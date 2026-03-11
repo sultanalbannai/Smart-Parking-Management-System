@@ -1,0 +1,119 @@
+# Production Mall Parking Configuration - 36 Bays Across 4 Zones
+# Optimized for Jetson Nano deployment
+
+facility_name: "Grand Mall Parking - Ground Level"
+facility_id: "GRAND_MALL_L1"
+
+# Database
+database_path: "data/spms.db"
+
+# Display settings
+map_width: 1200
+map_height: 800
+
+# Parking Zones - 36 Total Bays
+# NOTE: Mall building occupies x: 420-780, y: 260-540
+# Bays must be positioned with sufficient clearance (min 50px from edges)
+parking_zones:
+  # ========== ZONE A: FASHION WING (North Entrance) ==========
+  - zone_id: "FASHION"
+    zone_name: "Fashion Wing"
+    entrance_id: "ENTRANCE_A"
+    entrance_name: "Fashion Entrance (North)"
+    entrance_color: "#EC4899"  # Pink
+    entrance_x: 600
+    entrance_y: 50
+    bays:
+      # Row 1 - Closest to entrance (moved further north)
+      - {id: "FA-01", category: "POD", distance: 8, x: 150, y: 80}
+      - {id: "FA-02", category: "POD", distance: 10, x: 240, y: 80}
+      - {id: "FA-03", category: "FAMILY", distance: 12, x: 330, y: 80}
+      - {id: "FA-04", category: "FAMILY", distance: 14, x: 420, y: 80}
+      - {id: "FA-05", category: "GENERAL", distance: 16, x: 510, y: 80}
+      - {id: "FA-06", category: "GENERAL", distance: 18, x: 600, y: 80}
+      - {id: "FA-07", category: "GENERAL", distance: 20, x: 690, y: 80}
+      - {id: "FA-08", category: "GENERAL", distance: 22, x: 780, y: 80}
+      - {id: "FA-09", category: "GENERAL", distance: 24, x: 870, y: 80}
+
+  # ========== ZONE B: SHOPPING WING (East Entrance) ==========
+  - zone_id: "SHOPPING"
+    zone_name: "Shopping Wing"
+    entrance_id: "ENTRANCE_B"
+    entrance_name: "Shopping Entrance (East)"
+    entrance_color: "#3B82F6"  # Blue
+    entrance_x: 1050
+    entrance_y: 400
+    bays:
+      # Row 1 - Right side (moved inward, away from east entrance icon at x: 1140)
+      - {id: "SH-01", category: "GENERAL", distance: 10, x: 900, y: 260}
+      - {id: "SH-02", category: "GENERAL", distance: 12, x: 900, y: 330}
+      - {id: "SH-03", category: "POD", distance: 8, x: 900, y: 400}
+      - {id: "SH-04", category: "FAMILY", distance: 10, x: 900, y: 470}
+      - {id: "SH-05", category: "GENERAL", distance: 14, x: 900, y: 540}
+      # Row 2 - Middle east
+      - {id: "SH-06", category: "GENERAL", distance: 18, x: 1000, y: 260}
+      - {id: "SH-07", category: "GENERAL", distance: 20, x: 1000, y: 330}
+      - {id: "SH-08", category: "STAFF", distance: 28, x: 1000, y: 400}
+      - {id: "SH-09", category: "GENERAL", distance: 22, x: 1000, y: 470}
+
+  # ========== ZONE C: FOOD COURT (South Entrance) ==========
+  - zone_id: "FOOD"
+    zone_name: "Food Court"
+    entrance_id: "ENTRANCE_C"
+    entrance_name: "Food Court Entrance (South)"
+    entrance_color: "#F59E0B"  # Orange
+    entrance_x: 600
+    entrance_y: 750
+    bays:
+      # Row 1 - Closest to food court (moved further south)
+      - {id: "FC-01", category: "POD", distance: 6, x: 150, y: 670}
+      - {id: "FC-02", category: "FAMILY", distance: 8, x: 240, y: 670}
+      - {id: "FC-03", category: "FAMILY", distance: 10, x: 330, y: 670}
+      - {id: "FC-04", category: "GENERAL", distance: 12, x: 420, y: 670}
+      - {id: "FC-05", category: "GENERAL", distance: 14, x: 510, y: 670}
+      - {id: "FC-06", category: "GENERAL", distance: 16, x: 600, y: 670}
+      - {id: "FC-07", category: "GENERAL", distance: 18, x: 690, y: 670}
+      - {id: "FC-08", category: "GENERAL", distance: 20, x: 780, y: 670}
+      - {id: "FC-09", category: "GENERAL", distance: 22, x: 870, y: 670}
+
+  # ========== ZONE D: ENTERTAINMENT (West Entrance) ==========
+  - zone_id: "ENTERTAINMENT"
+    zone_name: "Entertainment Wing"
+    entrance_id: "ENTRANCE_D"
+    entrance_name: "Cinema & Entertainment (West)"
+    entrance_color: "#8B5CF6"  # Purple
+    entrance_x: 150
+    entrance_y: 400
+    bays:
+      # Row 1 - Left side (moved inward, away from west entrance icon at x: 60)
+      - {id: "EN-01", category: "FAMILY", distance: 12, x: 150, y: 260}
+      - {id: "EN-02", category: "FAMILY", distance: 14, x: 150, y: 330}
+      - {id: "EN-03", category: "POD", distance: 8, x: 150, y: 400}
+      - {id: "EN-04", category: "GENERAL", distance: 16, x: 150, y: 470}
+      - {id: "EN-05", category: "GENERAL", distance: 18, x: 150, y: 540}
+      # Row 2 - Middle west
+      - {id: "EN-06", category: "GENERAL", distance: 22, x: 250, y: 260}
+      - {id: "EN-07", category: "GENERAL", distance: 24, x: 250, y: 330}
+      - {id: "EN-08", category: "STAFF", distance: 30, x: 250, y: 400}
+      - {id: "EN-09", category: "GENERAL", distance: 26, x: 250, y: 470}
+
+# Category distribution (36 total bays):
+# GENERAL: 24 bays (67%)
+# FAMILY: 6 bays (17%)
+# POD: 4 bays (11%)
+# STAFF: 2 bays (6%)
+
+# System behavior
+suggestion_mode: true  # Suggestions only, no reservations
+confirmation_timeout_sec: 300  # 5 minutes
+default_entrance: "ENTRANCE_ANY"  # Closest to any entrance by default
+
+# Jetson Nano optimization
+performance:
+  max_fps: 10  # Limit camera FPS for Jetson
+  inference_threads: 2
+  ui_refresh_rate: 2  # Hz
+
+# Logging
+log_level: "INFO"
+log_file: "logs/spms.log"

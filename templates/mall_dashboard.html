@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mall Parking - Visual Map</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/mall_dashboard.css') }}">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="dashboard">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">🏬</span>
+                <h1>Grand Mall Parking</h1>
+            </div>
+            <div class="header-right">
+                <div class="time" id="currentTime">--:--:--</div>
+                <div class="status online" id="status">
+                    <span class="dot"></span>
+                    <span>ONLINE</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left: Statistics & Zones -->
+            <aside class="left-panel">
+                <div class="stats-section">
+                    <h3>Overall Status</h3>
+                    <div class="stat-grid">
+                        <div class="stat-box">
+                            <div class="stat-number" id="totalBays">-</div>
+                            <div class="stat-label">Total Bays</div>
+                        </div>
+                        <div class="stat-box available">
+                            <div class="stat-number" id="availableBays">-</div>
+                            <div class="stat-label">Available</div>
+                        </div>
+                        <div class="stat-box occupied">
+                            <div class="stat-number" id="occupiedBays">-</div>
+                            <div class="stat-label">Occupied</div>
+                        </div>
+                    </div>
+                    <div class="occupancy-bar-container">
+                        <div class="occupancy-bar">
+                            <div class="occupancy-fill" id="occupancyFill"></div>
+                        </div>
+                        <div class="occupancy-text" id="occupancyText">0%</div>
+                    </div>
+                </div>
+
+                <div class="zones-section">
+                    <h3>Entrances & Zones</h3>
+                    <div id="zonesList"></div>
+                </div>
+
+                <div class="legend-section">
+                    <h3>Legend</h3>
+                    <div class="legend-items">
+                        <div class="legend-item">
+                            <span class="legend-dot available"></span>
+                            <span>Available</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-dot occupied"></span>
+                            <span>Occupied</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-dot pod"></span>
+                            <span>POD</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-dot family"></span>
+                            <span>Family</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-dot staff"></span>
+                            <span>Staff</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Center: Visual Parking Map -->
+            <main class="map-container">
+                <h2>Parking Layout</h2>
+                <div class="parking-map" id="parkingMap">
+                    <!-- SVG map will be rendered here -->
+                </div>
+            </main>
+
+            <!-- Right: Activity Feed -->
+            <aside class="right-panel">
+                <h3>Live Activity</h3>
+                <div class="activity-feed" id="activityFeed">
+                    <div class="activity-item">
+                        <span class="time">--:--:--</span>
+                        <span>System ready</span>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/mall_dashboard.js') }}"></script>
+</body>
+</html>

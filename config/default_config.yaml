@@ -1,0 +1,77 @@
+# Smart Parking Management System Configuration
+
+# Parking Facility Configuration
+facility:
+  name: "SPMS Demo Facility"
+  total_bays: 7
+  gate_id: "G1"
+
+# Bay Configuration
+bays:
+  # Bay IDs: B-01 through B-07
+  - id: "B-01"
+    category: "GENERAL"
+    distance_from_gate: 10.0
+    zone: 1
+  - id: "B-02"
+    category: "GENERAL"
+    distance_from_gate: 15.0
+    zone: 1
+  - id: "B-03"
+    category: "POD"  # People of Determination
+    distance_from_gate: 8.0
+    zone: 1
+  - id: "B-04"
+    category: "STAFF"
+    distance_from_gate: 25.0
+    zone: 2
+  - id: "B-05"
+    category: "GENERAL"
+    distance_from_gate: 20.0
+    zone: 2
+  - id: "B-06"
+    category: "GENERAL"
+    distance_from_gate: 30.0
+    zone: 2
+  - id: "B-07"
+    category: "GENERAL"
+    distance_from_gate: 35.0
+    zone: 2
+
+# Priority Classes
+priorities:
+  - "POD"      # People of Determination
+  - "STAFF"    # Staff parking
+  - "GENERAL"  # General public
+
+# Timing Configuration (in seconds)
+timing:
+  incoming_ttl: 300  # 5 minutes soft-hold on PENDING bay
+  confirmation_timeout: 120  # 2 minutes for bay confirmation
+  debounce_window: 2.0  # Stabilization window for occupancy
+  ui_refresh_rate: 2.0  # Hz
+
+# MQTT Configuration
+mqtt:
+  broker: "localhost"
+  port: 1883
+  keepalive: 60
+  topics:
+    parking_request: "parking/request"
+    bay_state: "parking/bays/{bay_id}/state"
+    bay_plate: "parking/bays/{bay_id}/plate"
+    suggestions: "parking/suggestions/{session_id}"
+    confirmation: "parking/bays/{bay_id}/confirmation"
+
+# Database Configuration
+database:
+  type: "sqlite"
+  path: "data/spms.db"
+
+# Simulation Configuration
+simulation:
+  vehicle_arrival_interval: 10  # seconds between vehicle arrivals
+  plate_recognition_confidence: 0.92
+  occupancy_confidence: 0.95
+  enable_noise: true
+  noise_level: 0.1

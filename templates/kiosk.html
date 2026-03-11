@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parking Guidance</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/kiosk.css') }}">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="kiosk">
+        <div class="kiosk-header">
+            <h1>🅿️ PARKING GUIDANCE</h1>
+            <div class="time" id="kioskTime">--:--:--</div>
+        </div>
+
+        <div class="main-display">
+            <!-- Welcome State -->
+            <div class="display-state welcome" id="welcomeState">
+                <div class="welcome-icon">👋</div>
+                <h2>WELCOME</h2>
+                <p>Please wait for parking assignment...</p>
+                <div class="parking-stats">
+                    <div class="stat">
+                        <div class="stat-number" id="kioskAvailable">-</div>
+                        <div class="stat-label">AVAILABLE BAYS</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Assigned State -->
+            <div class="display-state assigned hidden" id="assignedState">
+                <div class="assignment-header">
+                    <h2>YOUR PARKING BAY</h2>
+                </div>
+                
+                <div class="bay-assignment">
+                    <div class="arrow-indicator" id="directionArrow">→</div>
+                    <div class="bay-number" id="assignedBay">-</div>
+                    <div class="bay-category" id="bayCategory">GENERAL</div>
+                </div>
+
+                <div class="assignment-details">
+                    <div class="detail">
+                        <span class="detail-icon">📍</span>
+                        <span class="detail-text" id="bayLocation">Row 1</span>
+                    </div>
+                    <div class="detail">
+                        <span class="detail-icon">📏</span>
+                        <span class="detail-text" id="bayDistance">10m</span>
+                    </div>
+                </div>
+
+                <div class="alternatives" id="alternatives">
+                    <p class="alternatives-label">Alternative bays available:</p>
+                    <div class="alternatives-list" id="alternativesList"></div>
+                </div>
+
+                <div class="status-message success" id="statusMessage">
+                    ✓ Parking bay reserved for you
+                </div>
+            </div>
+
+            <!-- Full State -->
+            <div class="display-state full hidden" id="fullState">
+                <div class="full-icon">🚫</div>
+                <h2>PARKING FULL</h2>
+                <p>No available bays at this time</p>
+                <p class="full-subtext">Please check back later or use alternative parking</p>
+            </div>
+        </div>
+
+        <div class="kiosk-footer">
+            <div class="footer-info">
+                <span>Smart Parking Management System</span>
+                <span>•</span>
+                <span id="facilityName">Demo Facility</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/kiosk.js') }}"></script>
+</body>
+</html>

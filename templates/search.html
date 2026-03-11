@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Find My Car - Grand Mall Parking</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/search.css') }}">
+</head>
+<body>
+    <div class="search-container">
+        <!-- Header -->
+        <header class="search-header">
+            <div class="logo">
+                <span class="logo-icon">🚗</span>
+                <h1>Find My Car</h1>
+            </div>
+            <a href="/" class="btn-back">← Back to Dashboard</a>
+        </header>
+
+        <!-- Search Section -->
+        <div class="search-content">
+            <div class="search-box-container">
+                <h2>Enter Your License Plate</h2>
+                <p class="search-subtitle">We'll show you exactly where you parked</p>
+                
+                <div class="search-input-wrapper">
+                    <input 
+                        type="text" 
+                        id="plateInput" 
+                        class="plate-input" 
+                        placeholder="e.g., ABC123 or 12345"
+                        autocomplete="off"
+                        maxlength="20"
+                    >
+                    <button id="btnSearch" class="btn-search">
+                        <span class="search-icon">🔍</span>
+                        Find My Car
+                    </button>
+                </div>
+
+                <div id="searchError" class="error-message" style="display: none;">
+                    <span class="error-icon">⚠️</span>
+                    <span id="errorText"></span>
+                </div>
+            </div>
+
+            <!-- Results Section -->
+            <div id="resultsSection" class="results-section" style="display: none;">
+                <div class="results-header">
+                    <h3>Your Parking Location</h3>
+                    <button id="btnNewSearch" class="btn-new-search">New Search</button>
+                </div>
+
+                <div class="results-grid">
+                    <!-- Bay Info Card -->
+                    <div class="bay-info-card">
+                        <div class="bay-info-header">
+                            <div class="bay-badge" id="bayBadge">-</div>
+                            <div class="bay-status" id="bayStatus">
+                                <span class="status-dot occupied"></span>
+                                <span>Occupied</span>
+                            </div>
+                        </div>
+
+                        <div class="bay-details">
+                            <div class="detail-item">
+                                <span class="detail-icon">🏢</span>
+                                <div class="detail-content">
+                                    <div class="detail-label">Zone</div>
+                                    <div class="detail-value" id="zoneName">-</div>
+                                </div>
+                            </div>
+
+                            <div class="detail-item">
+                                <span class="detail-icon">🚪</span>
+                                <div class="detail-content">
+                                    <div class="detail-label">Nearest Entrance</div>
+                                    <div class="detail-value" id="entranceName">-</div>
+                                </div>
+                            </div>
+
+                            <div class="detail-item">
+                                <span class="detail-icon">📍</span>
+                                <div class="detail-content">
+                                    <div class="detail-label">Category</div>
+                                    <div class="detail-value" id="bayCategory">-</div>
+                                </div>
+                            </div>
+
+                            <div class="detail-item">
+                                <span class="detail-icon">🕐</span>
+                                <div class="detail-content">
+                                    <div class="detail-label">Parked At</div>
+                                    <div class="detail-value" id="parkedTime">-</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bay-directions">
+                            <h4>How to Find Your Car:</h4>
+                            <ol id="directionsList">
+                                <li>Look for the <strong id="dirZone">-</strong> zone signs</li>
+                                <li>Head towards the <strong id="dirEntrance">-</strong></li>
+                                <li>Find bay <strong id="dirBay">-</strong></li>
+                            </ol>
+                        </div>
+                    </div>
+
+                    <!-- Map Card -->
+                    <div class="map-card">
+                        <h4>Visual Location</h4>
+                        <div class="map-wrapper">
+                            <svg id="searchMap" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid meet">
+                                <!-- Mall building (center) -->
+                                <rect x="420" y="260" width="360" height="280" 
+                                      fill="#1a1f35" stroke="#475569" stroke-width="3" rx="10"/>
+                                <text x="600" y="390" text-anchor="middle" fill="#94a3b8" font-size="20" font-weight="bold">
+                                    MALL
+                                </text>
+                                <text x="600" y="415" text-anchor="middle" fill="#64748b" font-size="14">
+                                    Grand Shopping Center
+                                </text>
+                                
+                                <!-- Bays will be inserted here -->
+                                <g id="baysGroup"></g>
+                                
+                                <!-- Highlighted bay will be inserted here -->
+                                <g id="highlightGroup"></g>
+                                
+                                <!-- Entrances -->
+                                <g id="entrancesGroup"></g>
+                            </svg>
+                        </div>
+                        <div class="map-legend">
+                            <div class="legend-item">
+                                <span class="legend-dot your-car"></span>
+                                <span>Your Car</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-dot other-cars"></span>
+                                <span>Other Bays</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-dot entrance"></span>
+                                <span>Entrance</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="search-footer">
+            <p>Grand Mall Parking - Smart Parking Management System</p>
+            <p>Need help? Contact security at Level 1 Information Desk</p>
+        </footer>
+    </div>
+
+    <script>
+        const plateInput = document.getElementById('plateInput');
+        const btnSearch = document.getElementById('btnSearch');
+        const searchError = document.getElementById('searchError');
+        const errorText = document.getElementById('errorText');
+        const resultsSection = document.getElementById('resultsSection');
+        const btnNewSearch = document.getElementById('btnNewSearch');
+
+        let allBays = {};
+
+        // Load all bays on page load
+        async function loadBays() {
+            try {
+                const response = await fetch('/api/bays');
+                const data = await response.json();
+                allBays = data.bays || {};
+                renderAllBays();
+                renderEntrances();
+            } catch (error) {
+                console.error('Failed to load bays:', error);
+            }
+        }
+
+        // Render all bays in gray
+        function renderAllBays() {
+            const baysGroup = document.getElementById('baysGroup');
+            baysGroup.innerHTML = '';
+
+            Object.values(allBays).forEach(bay => {
+                const bayGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                bayGroup.setAttribute('class', 'search-bay');
+
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', bay.coordinates_x);
+                rect.setAttribute('y', bay.coordinates_y);
+                rect.setAttribute('width', 60);
+                rect.setAttribute('height', 40);
+                rect.setAttribute('fill', '#1e293b');
+                rect.setAttribute('fill-opacity', '0.3');
+                rect.setAttribute('stroke', '#475569');
+                rect.setAttribute('stroke-width', '1');
+                rect.setAttribute('rx', '4');
+
+                bayGroup.appendChild(rect);
+                baysGroup.appendChild(bayGroup);
+            });
+        }
+
+        // Render entrance markers
+        function renderEntrances() {
+            const entrancesGroup = document.getElementById('entrancesGroup');
+            entrancesGroup.innerHTML = '';
+
+            const entrances = getUniqueEntrances();
+            entrances.forEach(entrance => {
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', entrance.x);
+                circle.setAttribute('cy', entrance.y);
+                circle.setAttribute('r', 20);
+                circle.setAttribute('fill', entrance.color);
+                circle.setAttribute('opacity', '0.7');
+                circle.setAttribute('stroke', 'white');
+                circle.setAttribute('stroke-width', '2');
+
+                const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                icon.setAttribute('x', entrance.x);
+                icon.setAttribute('y', entrance.y + 5);
+                icon.setAttribute('text-anchor', 'middle');
+                icon.setAttribute('font-size', '16');
+                icon.textContent = entrance.icon;
+
+                entrancesGroup.appendChild(circle);
+                entrancesGroup.appendChild(icon);
+            });
+        }
+
+        function getUniqueEntrances() {
+            const entrances = [];
+            const seen = new Set();
+            
+            Object.values(allBays).forEach(bay => {
+                if (bay.entrance_id && !seen.has(bay.entrance_id)) {
+                    seen.add(bay.entrance_id);
+                    entrances.push({
+                        id: bay.entrance_id,
+                        name: bay.entrance_name,
+                        color: bay.entrance_color,
+                        zone: bay.zone_name,
+                        x: getEntranceX(bay.entrance_id),
+                        y: getEntranceY(bay.entrance_id),
+                        icon: getEntranceIcon(bay.zone_name)
+                    });
+                }
+            });
+            
+            return entrances;
+        }
+
+        function getEntranceX(entranceId) {
+            if (entranceId === 'ENTRANCE_A') return 600;
+            if (entranceId === 'ENTRANCE_B') return 1050;
+            if (entranceId === 'ENTRANCE_C') return 600;
+            if (entranceId === 'ENTRANCE_D') return 150;
+            return 600;
+        }
+
+        function getEntranceY(entranceId) {
+            if (entranceId === 'ENTRANCE_A') return 50;
+            if (entranceId === 'ENTRANCE_B') return 400;
+            if (entranceId === 'ENTRANCE_C') return 750;
+            if (entranceId === 'ENTRANCE_D') return 400;
+            return 400;
+        }
+
+        function getEntranceIcon(zone) {
+            if (zone === 'FASHION') return '👗';
+            if (zone === 'SHOPPING') return '🛍️';
+            if (zone === 'FOOD') return '🍕';
+            if (zone === 'ENTERTAINMENT') return '🎬';
+            return '🅿️';
+        }
+
+        // Search for vehicle
+        async function searchPlate() {
+            const plate = plateInput.value.trim().toUpperCase();
+            
+            if (!plate) {
+                showError('Please enter a license plate number');
+                return;
+            }
+
+            hideError();
+            btnSearch.disabled = true;
+            btnSearch.textContent = 'Searching...';
+
+            try {
+                const response = await fetch(`/api/search-plate?plate=${encodeURIComponent(plate)}`);
+                const data = await response.json();
+
+                if (data.found) {
+                    displayResults(data.bay, data.session);
+                } else {
+                    showError('Vehicle not found. Please check your plate number or you may have already exited.');
+                }
+            } catch (error) {
+                showError('Search failed. Please try again.');
+                console.error('Search error:', error);
+            } finally {
+                btnSearch.disabled = false;
+                btnSearch.innerHTML = '<span class="search-icon">🔍</span>Find My Car';
+            }
+        }
+
+        function displayResults(bay, session) {
+            // Hide search, show results
+            document.querySelector('.search-box-container').style.display = 'none';
+            resultsSection.style.display = 'block';
+
+            // Update bay info
+            document.getElementById('bayBadge').textContent = bay.bay_id;
+            document.getElementById('zoneName').textContent = bay.zone_name || '-';
+            document.getElementById('entranceName').textContent = bay.entrance_name || '-';
+            document.getElementById('bayCategory').textContent = bay.category || '-';
+            
+            // Format parked time
+            if (session && session.timestamp_created) {
+                const parkedTime = new Date(session.timestamp_created);
+                document.getElementById('parkedTime').textContent = parkedTime.toLocaleTimeString();
+            }
+
+            // Update directions
+            document.getElementById('dirZone').textContent = bay.zone_name;
+            document.getElementById('dirEntrance').textContent = bay.entrance_name;
+            document.getElementById('dirBay').textContent = bay.bay_id;
+
+            // Highlight on map
+            highlightBay(bay);
+        }
+
+        function highlightBay(bay) {
+            const highlightGroup = document.getElementById('highlightGroup');
+            highlightGroup.innerHTML = '';
+
+            // Draw pulsing highlight
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', bay.coordinates_x);
+            rect.setAttribute('y', bay.coordinates_y);
+            rect.setAttribute('width', 60);
+            rect.setAttribute('height', 40);
+            rect.setAttribute('fill', '#f59e0b');
+            rect.setAttribute('fill-opacity', '0.5');
+            rect.setAttribute('stroke', '#f59e0b');
+            rect.setAttribute('stroke-width', '4');
+            rect.setAttribute('rx', '4');
+            rect.setAttribute('class', 'pulse-highlight');
+
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', bay.coordinates_x + 30);
+            text.setAttribute('y', bay.coordinates_y + 25);
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('fill', 'white');
+            text.setAttribute('font-size', '14');
+            text.setAttribute('font-weight', 'bold');
+            text.textContent = bay.bay_id;
+
+            // Add "YOU ARE HERE" pointer
+            const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            arrow.setAttribute('d', `M ${bay.coordinates_x + 30} ${bay.coordinates_y - 10} L ${bay.coordinates_x + 30} ${bay.coordinates_y - 40}`);
+            arrow.setAttribute('stroke', '#f59e0b');
+            arrow.setAttribute('stroke-width', '3');
+            arrow.setAttribute('marker-end', 'url(#arrowhead)');
+
+            const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            label.setAttribute('x', bay.coordinates_x + 30);
+            label.setAttribute('y', bay.coordinates_y - 45);
+            label.setAttribute('text-anchor', 'middle');
+            label.setAttribute('fill', '#f59e0b');
+            label.setAttribute('font-size', '12');
+            label.setAttribute('font-weight', 'bold');
+            label.textContent = 'YOUR CAR';
+
+            // Add arrowhead marker
+            const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+            const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+            marker.setAttribute('id', 'arrowhead');
+            marker.setAttribute('markerWidth', '10');
+            marker.setAttribute('markerHeight', '10');
+            marker.setAttribute('refX', '5');
+            marker.setAttribute('refY', '3');
+            marker.setAttribute('orient', 'auto');
+            const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            polygon.setAttribute('points', '0 0, 10 3, 0 6');
+            polygon.setAttribute('fill', '#f59e0b');
+            marker.appendChild(polygon);
+            defs.appendChild(marker);
+
+            highlightGroup.appendChild(defs);
+            highlightGroup.appendChild(rect);
+            highlightGroup.appendChild(text);
+            highlightGroup.appendChild(arrow);
+            highlightGroup.appendChild(label);
+        }
+
+        function showError(message) {
+            errorText.textContent = message;
+            searchError.style.display = 'flex';
+        }
+
+        function hideError() {
+            searchError.style.display = 'none';
+        }
+
+        function resetSearch() {
+            plateInput.value = '';
+            document.querySelector('.search-box-container').style.display = 'block';
+            resultsSection.style.display = 'none';
+            hideError();
+        }
+
+        // Event listeners
+        btnSearch.addEventListener('click', searchPlate);
+        btnNewSearch.addEventListener('click', resetSearch);
+        plateInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') searchPlate();
+        });
+
+        // Auto-focus input
+        plateInput.focus();
+
+        // Load bays on page load
+        loadBays();
+    </script>
+</body>
+</html>

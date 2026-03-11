@@ -1,0 +1,112 @@
+# Enhanced SPMS Configuration - Multi-Level Mall Parking (40 Bays)
+
+# Facility Information
+facility_name: "Grand Mall Parking - Multi-Level"
+facility_id: "GRAND_MALL_001"
+
+# Database
+database_path: "data/spms.db"
+
+# Parking Layout - 40 Bays across 4 entrance zones
+parking_zones:
+  # Fashion Wing - Entrance A (North) - 10 bays
+  - zone_id: "FASHION"
+    zone_name: "Fashion Wing"
+    entrance_id: "ENTRANCE_A"
+    entrance_name: "Fashion Entrance (North)"
+    entrance_color: "#EC4899"  # Pink
+    bays:
+      # Row 1 (closest to entrance)
+      - {id: "FA-01", category: "POD", distance_to_entrance: 8, coordinates: {x: 100, y: 80}}
+      - {id: "FA-02", category: "FAMILY", distance_to_entrance: 10, coordinates: {x: 200, y: 80}}
+      - {id: "FA-03", category: "GENERAL", distance_to_entrance: 12, coordinates: {x: 300, y: 80}}
+      - {id: "FA-04", category: "GENERAL", distance_to_entrance: 14, coordinates: {x: 400, y: 80}}
+      - {id: "FA-05", category: "GENERAL", distance_to_entrance: 16, coordinates: {x: 500, y: 80}}
+      # Row 2 (farther)
+      - {id: "FA-06", category: "GENERAL", distance_to_entrance: 20, coordinates: {x: 100, y: 150}}
+      - {id: "FA-07", category: "GENERAL", distance_to_entrance: 22, coordinates: {x: 200, y: 150}}
+      - {id: "FA-08", category: "FAMILY", distance_to_entrance: 24, coordinates: {x: 300, y: 150}}
+      - {id: "FA-09", category: "GENERAL", distance_to_entrance: 26, coordinates: {x: 400, y: 150}}
+      - {id: "FA-10", category: "STAFF", distance_to_entrance: 28, coordinates: {x: 500, y: 150}}
+
+  # Shopping Wing - Entrance B (East) - 10 bays
+  - zone_id: "SHOPPING"
+    zone_name: "Shopping Wing"
+    entrance_id: "ENTRANCE_B"
+    entrance_name: "Shopping Entrance (East)"
+    entrance_color: "#3B82F6"  # Blue
+    bays:
+      # Row 1
+      - {id: "SH-01", category: "POD", distance_to_entrance: 10, coordinates: {x: 750, y: 250}}
+      - {id: "SH-02", category: "GENERAL", distance_to_entrance: 12, coordinates: {x: 750, y: 330}}
+      - {id: "SH-03", category: "GENERAL", distance_to_entrance: 14, coordinates: {x: 750, y: 410}}
+      - {id: "SH-04", category: "FAMILY", distance_to_entrance: 16, coordinates: {x: 750, y: 490}}
+      - {id: "SH-05", category: "GENERAL", distance_to_entrance: 18, coordinates: {x: 750, y: 570}}
+      # Row 2
+      - {id: "SH-06", category: "GENERAL", distance_to_entrance: 22, coordinates: {x: 670, y: 250}}
+      - {id: "SH-07", category: "GENERAL", distance_to_entrance: 24, coordinates: {x: 670, y: 330}}
+      - {id: "SH-08", category: "STAFF", distance_to_entrance: 26, coordinates: {x: 670, y: 410}}
+      - {id: "SH-09", category: "GENERAL", distance_to_entrance: 28, coordinates: {x: 670, y: 490}}
+      - {id: "SH-10", category: "GENERAL", distance_to_entrance: 30, coordinates: {x: 670, y: 570}}
+
+  # Food Court - Entrance C (South) - 10 bays
+  - zone_id: "FOOD"
+    zone_name: "Food Court"
+    entrance_id: "ENTRANCE_C"
+    entrance_name: "Food Court Entrance (South)"
+    entrance_color: "#F59E0B"  # Orange
+    bays:
+      # Row 1
+      - {id: "FC-01", category: "POD", distance_to_entrance: 6, coordinates: {x: 500, y: 720}}
+      - {id: "FC-02", category: "FAMILY", distance_to_entrance: 8, coordinates: {x: 400, y: 720}}
+      - {id: "FC-03", category: "GENERAL", distance_to_entrance: 10, coordinates: {x: 300, y: 720}}
+      - {id: "FC-04", category: "GENERAL", distance_to_entrance: 12, coordinates: {x: 200, y: 720}}
+      - {id: "FC-05", category: "GENERAL", distance_to_entrance: 14, coordinates: {x: 100, y: 720}}
+      # Row 2
+      - {id: "FC-06", category: "GENERAL", distance_to_entrance: 18, coordinates: {x: 500, y: 650}}
+      - {id: "FC-07", category: "GENERAL", distance_to_entrance: 20, coordinates: {x: 400, y: 650}}
+      - {id: "FC-08", category: "FAMILY", distance_to_entrance: 22, coordinates: {x: 300, y: 650}}
+      - {id: "FC-09", category: "GENERAL", distance_to_entrance: 24, coordinates: {x: 200, y: 650}}
+      - {id: "FC-10", category: "STAFF", distance_to_entrance: 26, coordinates: {x: 100, y: 650}}
+
+  # Entertainment - Entrance D (West) - 10 bays
+  - zone_id: "ENTERTAINMENT"
+    zone_name: "Entertainment Wing"
+    entrance_id: "ENTRANCE_D"
+    entrance_name: "Cinema & Entertainment (West)"
+    entrance_color: "#8B5CF6"  # Purple
+    bays:
+      # Row 1
+      - {id: "EN-01", category: "POD", distance_to_entrance: 12, coordinates: {x: 50, y: 570}}
+      - {id: "EN-02", category: "GENERAL", distance_to_entrance: 14, coordinates: {x: 50, y: 490}}
+      - {id: "EN-03", category: "FAMILY", distance_to_entrance: 16, coordinates: {x: 50, y: 410}}
+      - {id: "EN-04", category: "GENERAL", distance_to_entrance: 18, coordinates: {x: 50, y: 330}}
+      - {id: "EN-05", category: "GENERAL", distance_to_entrance: 20, coordinates: {x: 50, y: 250}}
+      # Row 2
+      - {id: "EN-06", category: "GENERAL", distance_to_entrance: 24, coordinates: {x: 130, y: 570}}
+      - {id: "EN-07", category: "GENERAL", distance_to_entrance: 26, coordinates: {x: 130, y: 490}}
+      - {id: "EN-08", category: "STAFF", distance_to_entrance: 28, coordinates: {x: 130, y: 410}}
+      - {id: "EN-09", category: "GENERAL", distance_to_entrance: 30, coordinates: {x: 130, y: 330}}
+      - {id: "EN-10", category: "FAMILY", distance_to_entrance: 32, coordinates: {x: 130, y: 250}}
+
+# Default behavior
+default_entrance: "ENTRANCE_ANY"  # Recommends closest to ANY entrance
+suggestion_mode: true  # Suggestions only, no reservations
+confirmation_timeout_sec: 300  # 5 minutes to reach suggested bay
+
+# Performance settings for Jetson Nano
+jetson_optimization:
+  max_concurrent_cameras: 10  # Process 10 camera streams max
+  inference_batch_size: 4
+  frame_rate: 10  # 10 FPS per camera
+  resolution: "720p"
+  enable_tensorrt: true
+
+# Messaging
+mqtt:
+  broker: "localhost"
+  port: 1883
+  
+# Logging
+log_level: "INFO"
+log_file: "logs/spms.log"
