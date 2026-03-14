@@ -1,0 +1,89 @@
+# Camera Demo Configuration - Single Entrance, 36 Bays
+# Uses real camera ALPR instead of plate generation
+
+facility_name: "Smart Parking System - Camera Demo"
+facility_id: "DEMO_CAMERA_001"
+
+# Database
+database_path: "data/spms.db"
+
+# Display settings
+map_width: 1200
+map_height: 850
+
+# Single entrance parking layout - 36 bays in 4 rows
+# Layout (viewed from top, entrance at bottom-center):
+#
+#  Row 4 (farthest) : P-28 P-29 P-30 P-31 P-32 P-33 P-34 P-35 P-36
+#  Row 3            : P-19 P-20 P-21 P-22 P-23 P-24 P-25 P-26 P-27
+#  Row 2            : P-10 P-11 P-12 P-13 P-14 P-15 P-16 P-17 P-18
+#  Row 1 (closest)  : P-01 P-02 P-03 P-04 P-05 P-06 P-07 P-08 P-09
+#                              [MAIN ENTRANCE]
+
+parking_zones:
+  - zone_id: "MAIN"
+    zone_name: "Main Parking"
+    entrance_id: "ENTRANCE_MAIN"
+    entrance_name: "Main Entrance"
+    entrance_color: "#3B82F6"
+    entrance_x: 600
+    entrance_y: 760
+    bays:
+      # ── Row 1 (closest to entrance, y=560) ──
+      # P-01, P-02 are POD (reserved, nearest to entrance)
+      # P-03 is STAFF
+      # P-04..P-09 are GENERAL
+      - {id: "P-01", category: "POD",     distance: 20, x: 85,   y: 560}
+      - {id: "P-02", category: "POD",     distance: 22, x: 200,  y: 560}
+      - {id: "P-03", category: "STAFF",   distance: 24, x: 315,  y: 560}
+      - {id: "P-04", category: "GENERAL", distance: 26, x: 430,  y: 560}
+      - {id: "P-05", category: "GENERAL", distance: 28, x: 545,  y: 560}
+      - {id: "P-06", category: "GENERAL", distance: 30, x: 660,  y: 560}
+      - {id: "P-07", category: "GENERAL", distance: 32, x: 775,  y: 560}
+      - {id: "P-08", category: "GENERAL", distance: 34, x: 890,  y: 560}
+      - {id: "P-09", category: "GENERAL", distance: 36, x: 1005, y: 560}
+
+      # ── Row 2 (y=430) ──
+      - {id: "P-10", category: "STAFF",   distance: 50, x: 85,   y: 430}
+      - {id: "P-11", category: "GENERAL", distance: 52, x: 200,  y: 430}
+      - {id: "P-12", category: "GENERAL", distance: 54, x: 315,  y: 430}
+      - {id: "P-13", category: "GENERAL", distance: 56, x: 430,  y: 430}
+      - {id: "P-14", category: "GENERAL", distance: 58, x: 545,  y: 430}
+      - {id: "P-15", category: "GENERAL", distance: 60, x: 660,  y: 430}
+      - {id: "P-16", category: "GENERAL", distance: 62, x: 775,  y: 430}
+      - {id: "P-17", category: "GENERAL", distance: 64, x: 890,  y: 430}
+      - {id: "P-18", category: "GENERAL", distance: 66, x: 1005, y: 430}
+
+      # ── Row 3 (y=300) ──
+      - {id: "P-19", category: "GENERAL", distance: 80, x: 85,   y: 300}
+      - {id: "P-20", category: "GENERAL", distance: 82, x: 200,  y: 300}
+      - {id: "P-21", category: "GENERAL", distance: 84, x: 315,  y: 300}
+      - {id: "P-22", category: "GENERAL", distance: 86, x: 430,  y: 300}
+      - {id: "P-23", category: "GENERAL", distance: 88, x: 545,  y: 300}
+      - {id: "P-24", category: "GENERAL", distance: 90, x: 660,  y: 300}
+      - {id: "P-25", category: "GENERAL", distance: 92, x: 775,  y: 300}
+      - {id: "P-26", category: "GENERAL", distance: 94, x: 890,  y: 300}
+      - {id: "P-27", category: "GENERAL", distance: 96, x: 1005, y: 300}
+
+      # ── Row 4 (farthest, y=170) ──
+      - {id: "P-28", category: "GENERAL", distance: 110, x: 85,   y: 170}
+      - {id: "P-29", category: "GENERAL", distance: 112, x: 200,  y: 170}
+      - {id: "P-30", category: "GENERAL", distance: 114, x: 315,  y: 170}
+      - {id: "P-31", category: "GENERAL", distance: 116, x: 430,  y: 170}
+      - {id: "P-32", category: "GENERAL", distance: 118, x: 545,  y: 170}
+      - {id: "P-33", category: "GENERAL", distance: 120, x: 660,  y: 170}
+      - {id: "P-34", category: "GENERAL", distance: 122, x: 775,  y: 170}
+      - {id: "P-35", category: "GENERAL", distance: 124, x: 890,  y: 170}
+      - {id: "P-36", category: "GENERAL", distance: 126, x: 1005, y: 170}
+
+# Category summary (36 total):
+#   GENERAL : 32 bays (89%)
+#   POD     :  2 bays ( 6%)  - reserved, nearest entrance
+#   STAFF   :  2 bays ( 6%)  - reserved
+
+# System behavior
+suggestion_mode: true
+confirmation_timeout_sec: 300
+
+# Logging
+log_level: "INFO"

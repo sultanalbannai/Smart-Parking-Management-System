@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parking Guidance - Camera ALPR</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/production_kiosk.css') }}">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        /* ── Scanning screen ── */
+        .scan-pulse {
+            animation: pulse 1.8s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50%       { opacity: 0.5; transform: scale(1.08); }
+        }
+
+        .plate-banner {
+            background: linear-gradient(135deg, #1e3a5f, #2563eb);
+            border: 3px solid #60a5fa;
+            border-radius: 16px;
+            padding: 18px 36px;
+            display: inline-block;
+            margin: 20px auto;
+        }
+        .plate-banner .plate-text {
+            font-size: 3rem;
+            font-weight: 900;
+            letter-spacing: 8px;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+        }
+
+        .scanning-dots span {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            margin: 0 4px;
+            border-radius: 50%;
+            background: #3b82f6;
+            animation: bounce 1.4s infinite ease-in-out;
+        }
+        .scanning-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .scanning-dots span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+            40%            { transform: scale(1.2); opacity: 1; }
+        }
+
+        .welcome-message h2 { font-size: 2rem; }
+        .welcome-message p.subtitle { font-size: 1.1rem; color: #94a3b8; }
+
+        /* Availability bar below scan area */
+        .avail-bar {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            margin-top: 28px;
+        }
+        .avail-pill {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 30px;
+            padding: 10px 24px;
+            text-align: center;
+        }
+        .avail-pill .count {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #10b981;
+        }
+        .avail-pill .label {
+            font-size: 0.78rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+    </style>
+</head>
+<body>
+    <div class="kiosk">
+
+        <!-- Header -->
+        <div class="kiosk-header">
+            <h1>🅿️ PARKING GUIDANCE SYSTEM</h1>
+            <div class="time" id="kioskTime">--:--:--</div>
+        </div>
+
+        <!-- Main Display Area -->
+        <div class="display-area">
+
+            <!-- ── Screen 1: Scanning ── -->
+            <div class="screen welcome-screen" id="scanningScreen">
+                <div class="welcome-message">
+                    <h2>WELCOME</h2>
+                    <p class="subtitle">Please pull up to the camera at the entrance</p>
+                </div>
+
+                <!-- Camera icon with pulse -->
+                <div style="margin: 32px 0; text-align: center;">
+                    <div class="scan-pulse" style="font-size: 6rem; display: inline-block;">📷</div>
+                    <p style="margin-top: 16px; font-size: 1.3rem; color: #60a5fa; font-weight: 600;">
+                        Scanning for license plate...
+                    </p>
+                    <div class="scanning-dots" style="margin-top: 12px;">
+                        <span></span><span></span><span></span>
+                    </div>
+                </div>
+
+                <!-- Availability pills -->
+                <div class="avail-bar">
+                    <div class="avail-pill">
+                        <div class="count" id="totalAvailable">-</div>
+                        <div class="label">Available Spaces</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Screen 2: Plate Detected → Suggestion ── -->
+            <div class="screen suggestion-screen hidden" id="suggestionScreen">
+                <div class="suggestion-header">
+                    <div class="selected-zone" id="detectedPlateLabel">Plate Detected</div>
+                    <h2>YOUR SUGGESTED BAY</h2>
+                </div>
+
+                <!-- Detected plate badge -->
+                <div style="text-align: center; margin: 12px 0;">
+                    <div class="plate-banner">
+                        <div class="plate-text" id="detectedPlateText">------</div>
+                    </div>
+                </div>
+
+                <!-- Primary suggestion -->
+                <div class="primary-suggestion">
+                    <div class="bay-number" id="suggestedBay">---</div>
+                    <div class="bay-details">
+                        <div class="detail-row">
+                            <span class="detail-icon">📍</span>
+                            <span class="detail-text" id="bayDistance">-- meters</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-icon">🚶</span>
+                            <span class="detail-text" id="bayWalkTime">-- seconds walk</span>
+                        </div>
+                    </div>
+                    <div class="bay-category-badge" id="bayCategoryBadge"></div>
+                </div>
+
+                <!-- Alternatives -->
+                <div class="alternatives-section" id="alternativesSection">
+                    <h3>Also Available</h3>
+                    <div class="alternatives-grid" id="alternativesGrid"></div>
+                </div>
+
+                <div class="suggestion-notice">
+                    <p>💡 This is a <strong>suggestion</strong> – you may park in any available bay</p>
+                    <p class="notice-subtext">The system will confirm your actual parking location</p>
+                </div>
+            </div>
+
+            <!-- ── Screen 3: Parking Full ── -->
+            <div class="screen full-screen hidden" id="fullScreen">
+                <div class="full-icon">🚫</div>
+                <h2>PARKING CURRENTLY FULL</h2>
+                <p class="full-message">All spaces are occupied at this time</p>
+                <p class="full-submessage">Please check alternative parking areas</p>
+                <div class="retry-timer">
+                    <span>Checking for availability...</span>
+                    <div class="spinner"></div>
+                </div>
+            </div>
+
+        </div><!-- /display-area -->
+
+        <!-- Footer -->
+        <div class="kiosk-footer">
+            <div class="footer-info">
+                <span>Smart Parking Management System</span>
+                <span>•</span>
+                <span>Camera ALPR Integration</span>
+                <span>•</span>
+                <span>Real-time Guidance</span>
+            </div>
+        </div>
+
+    </div><!-- /kiosk -->
+
+    <script src="{{ url_for('static', filename='js/camera_kiosk.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Parking Dashboard - Camera ALPR</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/production.css') }}">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        /* Override zones panel → show a compact ALPR status card instead */
+        .alpr-card {
+            background: #0f172a;
+            border: 2px solid #1e3a5f;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+        .alpr-card h3 { margin: 0 0 12px; color: #94a3b8; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; }
+        .alpr-status-dot {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #64748b;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        .alpr-status-dot.scanning { background: #f59e0b; animation: blink 1s infinite; }
+        .alpr-status-dot.detected { background: #10b981; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        .plate-chip {
+            display: inline-block;
+            background: #1e3a5f;
+            border: 1px solid #3b82f6;
+            border-radius: 6px;
+            padding: 6px 16px;
+            font-family: 'Courier New', monospace;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: 4px;
+            margin-top: 8px;
+        }
+
+        /* Compact category breakdown */
+        .cat-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #1e293b; }
+        .cat-row:last-child { border-bottom: none; }
+        .cat-badge { font-size: 0.78rem; padding: 2px 8px; border-radius: 10px; }
+        .cat-badge.POD     { background: #7c3aed22; color: #a78bfa; border: 1px solid #7c3aed44; }
+        .cat-badge.STAFF   { background: #0369a122; color: #38bdf8; border: 1px solid #0369a144; }
+        .cat-badge.GENERAL { background: #05966922; color: #34d399; border: 1px solid #05966944; }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">📷</span>
+                <h1>Smart Parking – Camera ALPR</h1>
+            </div>
+            <div class="header-right">
+                <div class="time" id="currentTime">--:--:--</div>
+                <div class="status online" id="status">
+                    <span class="dot"></span>
+                    <span>ONLINE</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="main-content">
+
+            <!-- Left Panel: Stats + ALPR status -->
+            <aside class="left-panel">
+
+                <!-- Overall stats -->
+                <div class="card">
+                    <h3>Overall Status</h3>
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <div class="stat-value" id="totalBays">-</div>
+                            <div class="stat-label">Total</div>
+                        </div>
+                        <div class="stat-box available">
+                            <div class="stat-value" id="availableBays">-</div>
+                            <div class="stat-label">Available</div>
+                        </div>
+                        <div class="stat-box occupied">
+                            <div class="stat-value" id="occupiedBays">-</div>
+                            <div class="stat-label">Occupied</div>
+                        </div>
+                    </div>
+                    <div class="occupancy-section">
+                        <div class="occupancy-bar">
+                            <div class="occupancy-fill" id="occupancyFill"></div>
+                        </div>
+                        <div class="occupancy-label">
+                            <span id="occupancyText">0%</span> Occupancy
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Camera ALPR Status -->
+                <div class="alpr-card">
+                    <h3>Camera ALPR</h3>
+                    <div id="alprStatusLine">
+                        <span class="alpr-status-dot" id="alprDot"></span>
+                        <span id="alprStatusText" style="color:#94a3b8; font-size:0.9rem;">Waiting...</span>
+                    </div>
+                    <div id="alprPlateDisplay" style="display:none; margin-top:8px;">
+                        <div class="plate-chip" id="alprPlateChip"></div>
+                    </div>
+                </div>
+
+                <!-- Category breakdown -->
+                <div class="card">
+                    <h3>By Category</h3>
+                    <div id="categoryList"></div>
+                </div>
+
+                <!-- Legend -->
+                <div class="card">
+                    <h3>Legend</h3>
+                    <div class="legend">
+                        <div class="legend-item">
+                            <span class="legend-dot available"></span>
+                            <span>Available</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-dot occupied"></span>
+                            <span>Occupied</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-badge pod">♿</span>
+                            <span>POD Reserved</span>
+                        </div>
+                        <div class="legend-item">
+                            <span class="legend-badge staff">👔</span>
+                            <span>Staff Reserved</span>
+                        </div>
+                    </div>
+                </div>
+
+            </aside>
+
+            <!-- Center: Visual Parking Map -->
+            <main class="map-container">
+                <div class="map-header">
+                    <h2>Parking Layout – Single Entrance</h2>
+                    <div class="map-controls">
+                        <button class="btn-zoom" id="btnZoomIn">+</button>
+                        <button class="btn-zoom" id="btnZoomOut">−</button>
+                        <button class="btn-zoom" id="btnReset">⟲</button>
+                    </div>
+                </div>
+                <div class="map-wrapper" id="mapWrapper">
+                    <!--
+                        viewBox covers the full bay grid + entrance area.
+                        Bays: x 85–1085, y 170–610  (+ 50px bay height = 660)
+                        Entrance: y ~760
+                        Add padding → viewBox = "0 0 1200 850"
+                    -->
+                    <svg id="parkingMap" viewBox="0 0 1200 850" preserveAspectRatio="xMidYMid meet">
+
+                        <!-- Row labels (far → close) -->
+                        <text x="32" y="200" text-anchor="middle" fill="#475569" font-size="11">R4</text>
+                        <text x="32" y="460" text-anchor="middle" fill="#475569" font-size="11">R3</text>
+                        <text x="32" y="590" text-anchor="middle" fill="#475569" font-size="11">R2</text>
+                        <text x="32" y="720" text-anchor="middle" fill="#475569" font-size="11">R1</text>
+
+                        <!-- Drive-lane lines -->
+                        <line x1="60" y1="250" x2="1140" y2="250" stroke="#1e293b" stroke-width="1" stroke-dasharray="6,4"/>
+                        <line x1="60" y1="380" x2="1140" y2="380" stroke="#1e293b" stroke-width="1" stroke-dasharray="6,4"/>
+                        <line x1="60" y1="510" x2="1140" y2="510" stroke="#1e293b" stroke-width="1" stroke-dasharray="6,4"/>
+
+                        <!-- Bays rendered by JS -->
+                        <g id="parkingBays"></g>
+
+                        <!-- Entrance marker rendered by JS -->
+                        <g id="entranceMarker"></g>
+
+                    </svg>
+                </div>
+            </main>
+
+            <!-- Right Panel: Live Activity -->
+            <aside class="right-panel">
+                <div class="card">
+                    <h3>Live Activity</h3>
+                    <div class="activity-feed" id="activityFeed">
+                        <div class="activity-item">
+                            <span class="time">--:--:--</span>
+                            <span>System initialized</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/camera_dashboard.js') }}"></script>
+</body>
+</html>
