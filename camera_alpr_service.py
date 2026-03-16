@@ -30,8 +30,8 @@ def _normalize(text: str) -> str:
 
 
 def _is_plausible_plate(text: str) -> bool:
-    """Generic plate rule: 4–10 alphanumeric characters."""
-    return 4 <= len(text) <= 10
+    """Plate rule: 2–10 alphanumeric characters (supports short UAE plates)."""
+    return 2 <= len(text) <= 10
 
 
 class CameraALPRService:
