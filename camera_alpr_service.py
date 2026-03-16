@@ -1,346 +1,250 @@
 """
 Real Camera ALPR Service - USB Camera Integration
-Captures frames from USB camera and performs license plate recognition
+Captures frames from USB camera and performs license plate recognition using EasyOCR.
+Auto-detects plates via streak logic (no keypress needed).
 """
 
+import re
+import time
 import cv2
 import logging
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 import numpy as np
-from paddleocr import PaddleOCR
+import easyocr
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
+# ── Auto-detect tuning (matches test_camera_alpr_easyocr.py) ─────────────────
+OCR_EVERY_N_FRAMES  = 2      # Run OCR on every 2nd frame for speed
+MIN_CONF            = 0.40   # Minimum EasyOCR confidence to consider
+STREAK_TO_TRIGGER   = 3      # Consecutive matching reads before confirming
+TRIGGER_COOLDOWN_SEC = 3.0   # Seconds to wait before accepting another plate
+
+
+def _normalize(text: str) -> str:
+    """Strip to alphanumeric uppercase."""
+    return re.sub(r'[^A-Z0-9]', '', text.upper())
+
+
+def _is_plausible_plate(text: str) -> bool:
+    """Generic plate rule: 4–10 alphanumeric characters."""
+    return 4 <= len(text) <= 10
+
 
 class CameraALPRService:
     """
-    Real ALPR using USB camera.
-    Replaces simulated gate_alpr with actual camera + OCR.
+    Real ALPR using USB camera + EasyOCR.
+    Replaces simulated gate_alpr with actual camera detection.
+    Plates are auto-confirmed via streak logic – no keypress required.
     """
-    
-    def __init__(self, db_session: Session, message_bus, gate_id: str = "G1", 
+
+    def __init__(self, db_session: Session, message_bus, gate_id: str = "G1",
                  camera_index: int = 0):
-        """
-        Initialize camera ALPR service.
-        
-        Args:
-            db_session: Database session
-            message_bus: Message bus for publishing events
-            gate_id: Gate identifier
-            camera_index: USB camera index (0 = first camera, 1 = second, etc.)
-        """
-        self.db = db_session
-        self.bus = message_bus
-        self.gate_id = gate_id
+        self.db           = db_session
+        self.bus          = message_bus
+        self.gate_id      = gate_id
         self.camera_index = camera_index
-        
-        # Initialize camera
-        self.camera = None
+
+        self.camera          = None
         self.is_camera_ready = False
-        
-        # Initialize PaddleOCR for license plate reading
-        # use_angle_cls=True helps with rotated plates
-        # lang='en' for English, use 'ch' for Chinese
-        self.ocr = PaddleOCR(
-            use_angle_cls=True, 
-            lang='en',
-            use_gpu=False,  # Set to True if you have CUDA
-            show_log=False
-        )
-        
-        logger.info(f"Camera ALPR initialized for gate {gate_id}")
-    
+
+        # Load EasyOCR (downloads model on first run ~1 min)
+        logger.info("Loading EasyOCR model (first run may take a minute)...")
+        self.reader = easyocr.Reader(['en'], gpu=False)
+        logger.info(f"Camera ALPR (EasyOCR) initialized for gate {gate_id}")
+
+    # ── Camera lifecycle ──────────────────────────────────────────────────────
+
     def start_camera(self) -> bool:
-        """
-        Start the USB camera.
-        
-        Returns:
-            bool: True if camera started successfully
-        """
         try:
             self.camera = cv2.VideoCapture(self.camera_index)
-            
             if not self.camera.isOpened():
                 logger.error(f"Failed to open camera {self.camera_index}")
                 return False
-            
-            # Set camera properties for better quality
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+
+            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
             self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
             self.camera.set(cv2.CAP_PROP_FPS, 30)
-            
-            # Test read
-            ret, frame = self.camera.read()
+
+            ret, _ = self.camera.read()
             if not ret:
                 logger.error("Camera opened but cannot read frames")
                 return False
-            
+
             self.is_camera_ready = True
-            logger.info(f"Camera {self.camera_index} started successfully")
+            logger.info(f"Camera {self.camera_index} started")
             return True
-            
+
         except Exception as e:
             logger.error(f"Error starting camera: {e}")
             return False
-    
+
     def stop_camera(self):
-        """Stop and release the camera."""
         if self.camera is not None:
             self.camera.release()
             self.is_camera_ready = False
             logger.info("Camera stopped")
-    
+
     def capture_frame(self) -> Optional[np.ndarray]:
-        """
-        Capture a single frame from the camera.
-        
-        Returns:
-            np.ndarray: Captured frame, or None if failed
-        """
         if not self.is_camera_ready:
-            logger.warning("Camera not ready")
             return None
-        
         ret, frame = self.camera.read()
-        if not ret:
-            logger.error("Failed to capture frame")
-            return None
-        
-        return frame
-    
-    def preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
-        """
-        Preprocess frame for better OCR results.
-        
-        Args:
-            frame: Raw camera frame
-            
-        Returns:
-            Preprocessed frame
-        """
-        # Convert to grayscale
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        
-        # Apply histogram equalization for better contrast
-        enhanced = cv2.equalizeHist(gray)
-        
-        # Convert back to BGR for PaddleOCR
-        enhanced_bgr = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
-        
-        return enhanced_bgr
-    
+        return frame if ret else None
+
+    # ── OCR ───────────────────────────────────────────────────────────────────
+
     def read_license_plate(self, frame: np.ndarray) -> Tuple[Optional[str], float]:
         """
-        Read license plate from frame using PaddleOCR.
-        
-        Args:
-            frame: Image frame containing license plate
-            
-        Returns:
-            Tuple of (plate_text, confidence)
+        Run EasyOCR on a single frame.
+        Returns (plate_text, confidence) or (None, 0.0).
         """
         try:
-            # Preprocess frame
-            processed = self.preprocess_frame(frame)
-            
-            # Run OCR
-            result = self.ocr.ocr(processed, cls=True)
-            
-            if result is None or len(result) == 0 or result[0] is None:
-                logger.debug("No text detected in frame")
-                return None, 0.0
-            
-            # Extract text with highest confidence
-            best_text = None
-            best_confidence = 0.0
-            
-            for line in result[0]:
-                text = line[1][0]  # Detected text
-                confidence = line[1][1]  # Confidence score
-                
-                # Filter: license plates are usually 4-10 characters
-                # and contain letters/numbers only
-                text_clean = ''.join(filter(str.isalnum, text))
-                
-                if 4 <= len(text_clean) <= 10 and confidence > best_confidence:
-                    best_text = text_clean.upper()
-                    best_confidence = confidence
-            
-            if best_text and best_confidence > 0.7:  # Minimum confidence threshold
-                logger.info(f"Detected plate: {best_text} (conf: {best_confidence:.2f})")
-                return best_text, best_confidence
-            else:
-                logger.debug(f"Low confidence detection: {best_text} ({best_confidence:.2f})")
-                return None, 0.0
-                
+            gray    = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            results = self.reader.readtext(gray)
+
+            best_text, best_conf = None, 0.0
+            for (_bbox, text, conf) in results:
+                t = _normalize(text)
+                if conf >= MIN_CONF and _is_plausible_plate(t) and conf > best_conf:
+                    best_text, best_conf = t, conf
+
+            if best_text:
+                logger.debug(f"OCR: {best_text} ({best_conf:.2f})")
+            return best_text, best_conf
+
         except Exception as e:
-            logger.error(f"Error during OCR: {e}")
+            logger.error(f"OCR error: {e}")
             return None, 0.0
-    
-    def wait_for_vehicle(self, timeout: int = 30) -> Tuple[Optional[str], Optional[np.ndarray]]:
+
+    # ── Auto-detect loop ──────────────────────────────────────────────────────
+
+    def wait_for_vehicle(self, timeout: int = 300) -> Tuple[Optional[str], Optional[np.ndarray]]:
         """
-        Wait for a vehicle to arrive and read its plate.
-        Shows live camera feed with detection overlay.
-        
-        Args:
-            timeout: Maximum wait time in seconds
-            
+        Show live camera feed and auto-detect a license plate.
+        Triggers when the same plate is read STREAK_TO_TRIGGER times in a row.
+
+        Press 'q' to quit / skip to the next vehicle.
+
         Returns:
-            Tuple of (plate_number, frame_with_detection)
+            (plate_text, captured_frame)  or  (None, None) if user pressed 'q'.
         """
         if not self.is_camera_ready:
             logger.error("Camera not ready")
             return None, None
-        
-        logger.info("Waiting for vehicle... (Press 'c' to capture, 'q' to quit)")
-        
-        start_time = datetime.now()
-        best_plate = None
-        best_frame = None
-        best_confidence = 0.0
-        
+
+        logger.info("Waiting for vehicle – auto-detect active  |  'q' to quit")
+
+        start_time     = datetime.now()
+        frame_count    = 0
+        last_candidate = None
+        streak         = 0
+        last_trigger   = 0.0
+        best_frame     = None
+
         while True:
-            # Check timeout
+            # Timeout
             if (datetime.now() - start_time).seconds > timeout:
                 logger.warning("Vehicle detection timeout")
-                break
-            
-            # Capture frame
+                cv2.destroyAllWindows()
+                return None, None
+
             frame = self.capture_frame()
             if frame is None:
                 continue
-            
-            # Try to read plate
-            plate, confidence = self.read_license_plate(frame)
-            
-            # Update best detection
-            if plate and confidence > best_confidence:
-                best_plate = plate
-                best_confidence = confidence
-                best_frame = frame.copy()
-            
-            # Display frame
+
+            frame_count  += 1
             display_frame = frame.copy()
-            
-            # Add overlay text
-            if best_plate:
-                cv2.putText(display_frame, f"Plate: {best_plate}", 
-                           (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                cv2.putText(display_frame, f"Conf: {best_confidence:.2f}", 
-                           (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            else:
-                cv2.putText(display_frame, "Waiting for plate...", 
-                           (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            
-            cv2.putText(display_frame, "Press 'c' to capture | 'q' to quit", 
-                       (10, display_frame.shape[0] - 20), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-            
-            cv2.imshow('Gate Camera - ALPR', display_frame)
-            
-            # Handle key presses
-            key = cv2.waitKey(1) & 0xFF
-            
-            if key == ord('c'):  # Capture
-                if best_plate:
-                    logger.info(f"Manual capture: {best_plate}")
-                    cv2.destroyAllWindows()
-                    return best_plate, best_frame
+            h, w          = display_frame.shape[:2]
+
+            # Run OCR every N frames
+            if frame_count % OCR_EVERY_N_FRAMES == 0:
+                plate, conf = self.read_license_plate(frame)
+
+                if plate:
+                    if plate == last_candidate:
+                        streak += 1
+                    else:
+                        last_candidate = plate
+                        streak         = 1
+
+                    now = time.time()
+                    # Auto-trigger when streak reached and cooldown elapsed
+                    if streak >= STREAK_TO_TRIGGER and (now - last_trigger) >= TRIGGER_COOLDOWN_SEC:
+                        last_trigger = now
+                        best_frame   = frame.copy()
+                        logger.info(f"✅ Auto-detected plate: {plate} (conf {conf:.2f}, streak {streak})")
+                        cv2.destroyAllWindows()
+                        return plate, best_frame
                 else:
-                    logger.warning("No plate detected yet, keep camera pointed at plate")
-            
-            elif key == ord('q'):  # Quit
-                logger.info("Manual quit")
+                    last_candidate = None
+                    streak         = 0
+
+            # ── Overlay ──────────────────────────────────────────────────────
+            cv2.putText(display_frame, "AUTO DETECT | 'q' to quit",
+                        (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
+
+            if last_candidate:
+                bar_w = int((streak / STREAK_TO_TRIGGER) * 200)
+                cv2.rectangle(display_frame, (10, h - 50), (210, h - 30), (50, 50, 50), -1)
+                cv2.rectangle(display_frame, (10, h - 50), (10 + bar_w, h - 30), (0, 200, 0), -1)
+                cv2.putText(display_frame,
+                            f"Candidate: {last_candidate}  streak {streak}/{STREAK_TO_TRIGGER}",
+                            (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+            else:
+                cv2.putText(display_frame, "Scanning for plate...",
+                            (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 100, 255), 2)
+
+            cv2.imshow('Gate Camera – ALPR', display_frame)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                logger.info("User quit camera")
                 cv2.destroyAllWindows()
                 return None, None
-        
-        cv2.destroyAllWindows()
-        return best_plate, best_frame
-    
+
+    # ── Legacy helper (kept for compatibility) ────────────────────────────────
+
     def create_session_from_camera(self, priority_class, selected_zone: str = "ANY"):
         """
-        Create a vehicle session by reading plate from camera.
-        This replaces the simulated gate_alpr process_vehicle_arrival().
-        
-        Args:
-            priority_class: PriorityClass enum (GENERAL, FAMILY, POD, STAFF)
-            selected_zone: Driver's selected zone
-            
-        Returns:
-            VehicleSession object or None if detection failed
+        Legacy helper – creates a VehicleSession directly from camera.
+        (run_camera_demo.py handles session creation itself; this is kept
+        only for any scripts that called it previously.)
         """
-        from ..core.plate_hasher import hash_plate
-        from ..core import Clock
-        from ..models.database import VehicleSession
-        
-        logger.info("Reading license plate from camera...")
-        
-        plate_number, frame = self.wait_for_vehicle(timeout=60)
-        
+        from src.core.plate_hasher import hash_plate
+        from src.core import Clock
+        from src.models.database import VehicleSession
+
+        plate_number, _frame = self.wait_for_vehicle(timeout=60)
         if not plate_number:
             logger.error("Failed to read license plate")
             return None
-        
-        # Hash the plate for privacy
-        plate_hash = hash_plate(plate_number)
-        
-        # Create session
-        session_id = str(uuid.uuid4())
-        now = Clock.now()
-        
-        # Map zone to entrance
-        zone_to_entrance = {
-            "FASHION": "ENTRANCE_A",
-            "SHOPPING": "ENTRANCE_B",
-            "FOOD": "ENTRANCE_C",
-            "ENTERTAINMENT": "ENTRANCE_D",
-            "ANY": "ENTRANCE_ANY"
-        }
-        selected_entrance = zone_to_entrance.get(selected_zone, "ENTRANCE_ANY")
-        
+
+        plate_hash  = hash_plate(plate_number)
+        session_id  = str(uuid.uuid4())
+        now         = Clock.now()
+
         session = VehicleSession(
-            session_id=session_id,
-            gate_id=self.gate_id,
-            plate_hash=plate_hash,
-            priority_class=priority_class,
-            selected_entrance=selected_entrance,
-            selected_zone=selected_zone,
-            created_at=now,
-            expires_at=now + timedelta(hours=4)
+            session_id        = session_id,
+            gate_id           = self.gate_id,
+            plate_hash        = plate_hash,
+            priority_class    = priority_class,
+            selected_entrance = "ENTRANCE_ANY",
+            selected_zone     = selected_zone,
+            created_at        = now,
+            expires_at        = now + timedelta(hours=4)
         )
-        
         self.db.add(session)
         self.db.commit()
-        
-        # Publish events to message bus
-        self.bus.publish(
-            topic="parking/sessions/created",
-            payload={
-                "sessionId": session.session_id,
-                "gateId": self.gate_id,
-                "plateHash": session.plate_hash,
-                "priorityClass": session.priority_class.value,
-                "selectedEntrance": selected_entrance,
-                "selectedZone": selected_zone,
-                "createdAt": Clock.iso_format(now)
-            }
-        )
-        
-        self.bus.publish(
-            topic="parking/request",
-            payload={
-                "sessionId": session.session_id,
-                "gateId": self.gate_id,
-                "priorityClass": session.priority_class.value,
-                "selectedEntrance": selected_entrance,
-                "selectedZone": selected_zone,
-                "timestamp": Clock.timestamp_ms()
-            }
-        )
-        
-        logger.info(f"✅ Session created for plate: {plate_number} → {session_id[:8]}...")
-        
+
+        self.bus.publish("parking/request", {
+            "sessionId":     session_id,
+            "gateId":        self.gate_id,
+            "priorityClass": priority_class.value,
+            "selectedZone":  selected_zone,
+        })
+
+        logger.info(f"Session created for plate {plate_number} → {session_id[:8]}…")
         return session
