@@ -1,7 +1,12 @@
 """
 Real Camera ALPR Service - USB Camera Integration
 Captures frames from USB camera and performs license plate recognition using EasyOCR.
-Auto-detects plates via streak logic (no keypress needed).
+
+Detection strategy:
+  1. Background subtractor watches the centre zone of the frame.
+  2. When a vehicle fills that zone, ONE snapshot is taken.
+  3. EasyOCR runs once on that snapshot and the plate is returned.
+  No streak / repeated-frame logic – a single sharp photo is used.
 """
 
 import re
@@ -17,28 +22,38 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-# ── Auto-detect tuning (matches test_camera_alpr_easyocr.py) ─────────────────
-OCR_EVERY_N_FRAMES  = 2      # Run OCR on every 2nd frame for speed
-MIN_CONF            = 0.40   # Minimum EasyOCR confidence to consider
-STREAK_TO_TRIGGER   = 3      # Consecutive matching reads before confirming
-TRIGGER_COOLDOWN_SEC = 3.0   # Seconds to wait before accepting another plate
+# ── Tuning ────────────────────────────────────────────────────────────────────
+MIN_CONF            = 0.35   # minimum EasyOCR confidence to accept
+TRIGGER_COOLDOWN_SEC = 4.0   # seconds to ignore triggers after one fires
+
+# Centre trigger zone as fractions of (width, height)
+ZONE_LEFT   = 0.15
+ZONE_RIGHT  = 0.85
+ZONE_TOP    = 0.25
+ZONE_BOTTOM = 0.75
+
+# Fraction of the zone that must be foreground to fire the snapshot
+FG_THRESHOLD = 0.12
+
+# Frames to wait after presence is first detected before snapping
+# (lets the car settle into position)
+SETTLE_FRAMES = 8
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _normalize(text: str) -> str:
-    """Strip to alphanumeric uppercase."""
     return re.sub(r'[^A-Z0-9]', '', text.upper())
 
 
 def _is_plausible_plate(text: str) -> bool:
-    """Plate rule: 2–10 alphanumeric characters (supports short UAE plates)."""
     return 2 <= len(text) <= 10
 
 
 class CameraALPRService:
     """
     Real ALPR using USB camera + EasyOCR.
-    Replaces simulated gate_alpr with actual camera detection.
-    Plates are auto-confirmed via streak logic – no keypress required.
+    Fires once when a vehicle appears in the centre of the frame,
+    OCRs that single snapshot, and returns the plate.
     """
 
     def __init__(self, db_session: Session, message_bus, gate_id: str = "G1",
@@ -51,10 +66,9 @@ class CameraALPRService:
         self.camera          = None
         self.is_camera_ready = False
 
-        # Load EasyOCR (downloads model on first run ~1 min)
         logger.info("Loading EasyOCR model (first run may take a minute)...")
         self.reader = easyocr.Reader(['en'], gpu=False)
-        logger.info(f"Camera ALPR (EasyOCR) initialized for gate {gate_id}")
+        logger.info(f"Camera ALPR (EasyOCR) initialised for gate {gate_id}")
 
     # ── Camera lifecycle ──────────────────────────────────────────────────────
 
@@ -97,10 +111,7 @@ class CameraALPRService:
     # ── OCR ───────────────────────────────────────────────────────────────────
 
     def read_license_plate(self, frame: np.ndarray) -> Tuple[Optional[str], float]:
-        """
-        Run EasyOCR on a single frame.
-        Returns (plate_text, confidence) or (None, 0.0).
-        """
+        """Run EasyOCR on a single frame. Returns (plate_text, confidence)."""
         try:
             gray    = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             results = self.reader.readtext(gray)
@@ -119,33 +130,32 @@ class CameraALPRService:
             logger.error(f"OCR error: {e}")
             return None, 0.0
 
-    # ── Auto-detect loop ──────────────────────────────────────────────────────
+    # ── Main detection loop ───────────────────────────────────────────────────
 
     def wait_for_vehicle(self, timeout: int = 300) -> Tuple[Optional[str], Optional[np.ndarray]]:
         """
-        Show live camera feed and auto-detect a license plate.
-        Triggers when the same plate is read STREAK_TO_TRIGGER times in a row.
-
-        Press 'q' to quit / skip to the next vehicle.
-
-        Returns:
-            (plate_text, captured_frame)  or  (None, None) if user pressed 'q'.
+        Show live camera feed.
+        When a vehicle fills the centre zone, snap ONE frame and run OCR.
+        Returns (plate_text, frame) or (None, None) if 'q' pressed / timeout.
         """
         if not self.is_camera_ready:
             logger.error("Camera not ready")
             return None, None
 
-        logger.info("Waiting for vehicle – auto-detect active  |  'q' to quit")
+        logger.info("Waiting for vehicle – centre-snap mode  |  'q' to quit")
 
-        start_time     = datetime.now()
-        frame_count    = 0
-        last_candidate = None
-        streak         = 0
-        last_trigger   = 0.0
-        best_frame     = None
+        # Background subtractor – adapts to the empty scene quickly
+        bg_sub = cv2.createBackgroundSubtractorMOG2(
+            history=100, varThreshold=40, detectShadows=False
+        )
+
+        start_time    = datetime.now()
+        last_trigger  = 0.0
+        settle_count  = 0      # counts frames with presence detected
+        snap_frame    = None   # frozen frame waiting for OCR
+        snapped       = False  # True while we are processing a snapshot
 
         while True:
-            # Timeout
             if (datetime.now() - start_time).seconds > timeout:
                 logger.warning("Vehicle detection timeout")
                 cv2.destroyAllWindows()
@@ -155,64 +165,95 @@ class CameraALPRService:
             if frame is None:
                 continue
 
-            frame_count  += 1
-            display_frame = frame.copy()
-            h, w          = display_frame.shape[:2]
+            h, w = frame.shape[:2]
 
-            # Run OCR every N frames
-            if frame_count % OCR_EVERY_N_FRAMES == 0:
-                plate, conf = self.read_license_plate(frame)
+            # Compute centre zone pixel coordinates
+            zx1 = int(w * ZONE_LEFT)
+            zx2 = int(w * ZONE_RIGHT)
+            zy1 = int(h * ZONE_TOP)
+            zy2 = int(h * ZONE_BOTTOM)
+
+            display = frame.copy()
+
+            if not snapped:
+                # ── Check for vehicle presence in centre zone ─────────────
+                fg_mask  = bg_sub.apply(frame)
+                zone_fg  = fg_mask[zy1:zy2, zx1:zx2]
+                zone_area = max(1, (zx2 - zx1) * (zy2 - zy1))
+                fg_ratio  = np.count_nonzero(zone_fg) / zone_area
+
+                vehicle_present = fg_ratio >= FG_THRESHOLD
+
+                if vehicle_present:
+                    settle_count += 1
+                else:
+                    settle_count = 0
+
+                now = time.time()
+                if settle_count >= SETTLE_FRAMES and (now - last_trigger) >= TRIGGER_COOLDOWN_SEC:
+                    # Car is centred and steady – take the snapshot
+                    snap_frame = frame.copy()
+                    snapped    = True
+                    settle_count = 0
+                    logger.info("Vehicle centred – snapping frame for OCR...")
+
+                # ── Overlay: zone box + presence indicator ────────────────
+                colour = (0, 220, 0) if vehicle_present else (0, 120, 255)
+                cv2.rectangle(display, (zx1, zy1), (zx2, zy2), colour, 2)
+
+                bar_w = int(min(fg_ratio / FG_THRESHOLD, 1.0) * (zx2 - zx1))
+                cv2.rectangle(display, (zx1, zy2 + 8), (zx2, zy2 + 20), (40, 40, 40), -1)
+                cv2.rectangle(display, (zx1, zy2 + 8), (zx1 + bar_w, zy2 + 20), colour, -1)
+
+                cv2.putText(display, "Drive into the box  |  'q' to quit",
+                            (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 220, 0), 2)
+
+                if vehicle_present:
+                    cv2.putText(display,
+                                f"Vehicle detected – steadying... ({settle_count}/{SETTLE_FRAMES})",
+                                (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 220, 0), 2)
+                else:
+                    cv2.putText(display, "Scanning...",
+                                (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 120, 255), 2)
+
+            else:
+                # ── Show the frozen snapshot and run OCR ──────────────────
+                display = snap_frame.copy()
+                cv2.rectangle(display, (zx1, zy1), (zx2, zy2), (0, 200, 255), 3)
+                cv2.putText(display, "SNAP – reading plate...",
+                            (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 200, 255), 2)
+                cv2.imshow('Gate Camera – ALPR', display)
+                cv2.waitKey(1)
+
+                plate, conf = self.read_license_plate(snap_frame)
 
                 if plate:
-                    if plate == last_candidate:
-                        streak += 1
-                    else:
-                        last_candidate = plate
-                        streak         = 1
-
-                    now = time.time()
-                    # Auto-trigger when streak reached and cooldown elapsed
-                    if streak >= STREAK_TO_TRIGGER and (now - last_trigger) >= TRIGGER_COOLDOWN_SEC:
-                        last_trigger = now
-                        best_frame   = frame.copy()
-                        logger.info(f"✅ Auto-detected plate: {plate} (conf {conf:.2f}, streak {streak})")
-                        cv2.destroyAllWindows()
-                        return plate, best_frame
+                    last_trigger = time.time()
+                    logger.info(f"Plate detected: {plate}  conf={conf:.2f}")
+                    cv2.destroyAllWindows()
+                    return plate, snap_frame
                 else:
-                    last_candidate = None
-                    streak         = 0
+                    # OCR found nothing – show feedback and resume scanning
+                    logger.info("Snap: no plate found – resuming scan")
+                    cv2.putText(display, "No plate found – reposition",
+                                (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 60, 255), 2)
+                    cv2.imshow('Gate Camera – ALPR', display)
+                    cv2.waitKey(800)
+                    snapped    = False
+                    snap_frame = None
+                    last_trigger = time.time()  # brief cooldown before next snap
+                    continue
 
-            # ── Overlay ──────────────────────────────────────────────────────
-            cv2.putText(display_frame, "AUTO DETECT | 'q' to quit",
-                        (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2)
-
-            if last_candidate:
-                bar_w = int((streak / STREAK_TO_TRIGGER) * 200)
-                cv2.rectangle(display_frame, (10, h - 50), (210, h - 30), (50, 50, 50), -1)
-                cv2.rectangle(display_frame, (10, h - 50), (10 + bar_w, h - 30), (0, 200, 0), -1)
-                cv2.putText(display_frame,
-                            f"Candidate: {last_candidate}  streak {streak}/{STREAK_TO_TRIGGER}",
-                            (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
-            else:
-                cv2.putText(display_frame, "Scanning for plate...",
-                            (10, h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 100, 255), 2)
-
-            cv2.imshow('Gate Camera – ALPR', display_frame)
-
+            cv2.imshow('Gate Camera – ALPR', display)
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 logger.info("User quit camera")
                 cv2.destroyAllWindows()
                 return None, None
 
-    # ── Legacy helper (kept for compatibility) ────────────────────────────────
+    # ── Legacy helper ─────────────────────────────────────────────────────────
 
     def create_session_from_camera(self, priority_class, selected_zone: str = "ANY"):
-        """
-        Legacy helper – creates a VehicleSession directly from camera.
-        (run_camera_demo.py handles session creation itself; this is kept
-        only for any scripts that called it previously.)
-        """
         from src.core.plate_hasher import hash_plate
         from src.core import Clock
         from src.models.database import VehicleSession
@@ -222,9 +263,9 @@ class CameraALPRService:
             logger.error("Failed to read license plate")
             return None
 
-        plate_hash  = hash_plate(plate_number)
-        session_id  = str(uuid.uuid4())
-        now         = Clock.now()
+        plate_hash = hash_plate(plate_number)
+        session_id = str(uuid.uuid4())
+        now        = Clock.now()
 
         session = VehicleSession(
             session_id        = session_id,
@@ -246,5 +287,5 @@ class CameraALPRService:
             "selectedZone":  selected_zone,
         })
 
-        logger.info(f"Session created for plate {plate_number} → {session_id[:8]}…")
+        logger.info(f"Session created for plate {plate_number} -> {session_id[:8]}...")
         return session
