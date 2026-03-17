@@ -10,31 +10,31 @@
 
 cameras:
 
-  # ── Camera 0  (Row 1 – Staff, farthest from entrance) ────────────────────
+  # ── Camera 0  (Row 4 – General, farthest) ────────────────────────────────
   - camera_index: 0
     bays:
-      - bay_id: STF-01
+      - bay_id: G-09
         roi: []        # [x1, y1, x2, y2]  fill via calibration tool
-      - bay_id: STF-02
+      - bay_id: G-10
         roi: []
-      - bay_id: STF-03
+      - bay_id: G-11
         roi: []
-      - bay_id: STF-04
+      - bay_id: G-12
         roi: []
 
-  # ── Camera 1  (Row 2 – POD / Accessible) ─────────────────────────────────
+  # ── Camera 1  (Row 3 – General) ───────────────────────────────────────────
   - camera_index: 1
     bays:
-      - bay_id: POD-01
+      - bay_id: G-05
         roi: []
-      - bay_id: POD-02
+      - bay_id: G-06
         roi: []
-      - bay_id: POD-03
+      - bay_id: G-07
         roi: []
-      - bay_id: POD-04
+      - bay_id: G-08
         roi: []
 
-  # ── Camera 2  (Row 3 – General) ───────────────────────────────────────────
+  # ── Camera 2  (Row 2 – General) ───────────────────────────────────────────
   - camera_index: 2
     bays:
       - bay_id: G-01
