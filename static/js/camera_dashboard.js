@@ -61,6 +61,11 @@ function initSocket() {
         setAlprScanning();
     });
 
+    socket.on('plate_logged', (data) => {
+        const conf = data.conf ? ` (${Math.round(data.conf * 100)}%)` : '';
+        addActivity('confirmation', `Bay cam: ${data.plate || 'UNKNOWN'} at ${data.bayId}${conf}`);
+    });
+
     // Periodic sync to stay in step with DB
     setInterval(() => {
         fetch('/api/bays')

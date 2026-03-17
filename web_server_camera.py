@@ -37,6 +37,7 @@ def init_system(external_db=None, external_bus=None):
         message_bus.subscribe('parking/suggestion',           on_suggestion)
         message_bus.subscribe('parking/bays/+/confirmation',  on_confirmation)
         message_bus.subscribe('alpr/scanning',                on_alpr_scanning)
+        message_bus.subscribe('parking/bays/plate_logged',    on_plate_logged)
 
         logger.info("✅ Camera web server initialized")
 
@@ -101,6 +102,17 @@ def on_confirmation(topic, payload):
 def on_alpr_scanning(topic, payload):
     """Relayed to kiosk so it can show the 'scanning plate...' state."""
     socketio.emit('alpr_scanning', payload, namespace='/')
+
+
+def on_plate_logged(topic, payload):
+    """Relayed to dashboard activity feed when a bay camera logs a plate."""
+    logger.info(f"Plate logged: {payload.get('plate')} at bay {payload.get('bayId')}")
+    socketio.emit('plate_logged', {
+        'bayId':  payload.get('bayId'),
+        'plate':  payload.get('plate'),
+        'camera': payload.get('camera'),
+        'conf':   payload.get('conf'),
+    }, namespace='/')
 
 
 # ── Flask routes ──────────────────────────────────────────────────────────────
