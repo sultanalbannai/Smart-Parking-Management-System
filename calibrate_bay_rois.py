@@ -25,7 +25,7 @@ CONFIG_PATH = "config/camera_demo_config.yaml"
 ROIS_PATH   = "config/bay_rois.yaml"
 
 # ── Load config ───────────────────────────────────────────────────────────────
-with open(CONFIG_PATH) as f:
+with open(CONFIG_PATH, encoding="utf-8") as f:
     cfg = yaml.safe_load(f)
 
 bay_cameras = cfg.get("bay_cameras", [])
@@ -73,7 +73,7 @@ def calibrate():
     # Try to load existing ROIs so we can resume
     existing: dict = {}
     if Path(ROIS_PATH).exists():
-        with open(ROIS_PATH) as f:
+        with open(ROIS_PATH, encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
         for cam in raw.get("cameras", []):
             existing[cam["camera_index"]] = {
@@ -190,7 +190,7 @@ def _save(output: dict):
 
     data = {"cameras": cameras_list}
     Path(ROIS_PATH).parent.mkdir(parents=True, exist_ok=True)
-    with open(ROIS_PATH, "w") as f:
+    with open(ROIS_PATH, "w", encoding="utf-8") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
     total = sum(len(v) for v in output.values())

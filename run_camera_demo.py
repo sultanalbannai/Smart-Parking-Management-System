@@ -174,7 +174,7 @@ def main():
     print(" SMART PARKING – CAMERA ALPR DEMO ".center(60))
     print("="*60 + "\n")
 
-    with open(CONFIG_PATH) as f:
+    with open(CONFIG_PATH, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     print(f"🏬 {cfg['facility_name']}")

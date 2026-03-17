@@ -260,13 +260,13 @@ def load_bay_cameras(config_path: str, rois_path: str,
     Returns a list (one per camera).  Cameras whose ROI file entry is missing
     are still created but will skip unresolved bays silently.
     """
-    with open(config_path) as f:
+    with open(config_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     # Load ROIs if file exists
     rois_data: Dict[str, Dict] = {}
     if Path(rois_path).exists():
-        with open(rois_path) as f:
+        with open(rois_path, encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
         for cam_entry in raw.get("cameras", []):
             idx = cam_entry["camera_index"]
