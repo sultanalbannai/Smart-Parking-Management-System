@@ -281,7 +281,10 @@ def load_bay_cameras(config_path: str, rois_path: str,
     services = []
     for cam_cfg in cfg.get("bay_cameras", []):
         idx     = cam_cfg["camera_index"]
-        bay_ids = cam_cfg["bays"]
+        bay_ids = cam_cfg.get("bays") or []
+        if not bay_ids:
+            logger.info(f"Camera {idx}: no bays assigned – skipped")
+            continue
         label   = cam_cfg.get("label", f"BayCam-{idx}")
         rois    = rois_data.get(idx, {})
 

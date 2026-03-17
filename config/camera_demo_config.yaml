@@ -1,17 +1,16 @@
 # Camera Demo Configuration - Single Entrance, 16 Bays
-# 2 STAFF + 2 POD (entrance row)  +  12 GENERAL (3 rows x 4)  =  16 bays
+# 2 STAFF + 2 POD (entrance row)  +  12 GENERAL (3 rows x 4)  =  16 bays total
 #
 # Physical layout (matches cardboard mock-up):
 #
-#  Row 4 (farthest)   G-09   G-10   G-11   G-12   [General]  <- Camera 0
-#  Row 3              G-05   G-06   G-07   G-08   [General]  <- Camera 1
-#  Row 2              G-01   G-02   G-03   G-04   [General]  <- Camera 2
+#  Row 4 (farthest)   G-09   G-10   G-11   G-12   [General]
+#  Row 3              G-05   G-06   G-07   G-08   [General]
+#  Row 2              G-01   G-02   G-03   G-04   [General]
 #  Row 1 (entrance)   STF-01 POD-01 POD-02 STF-02 [Staff|POD|POD|Staff]
 #                              [MAIN ENTRANCE]
 #
 # SVG viewBox : 0 0 1200 850
 # Bay size    : 80 x 48 px
-# 4 bays centred: 4x80 + 3x40 = 440 px  ->  start_x = (1200-440)/2 = 380
 # x positions: 380 (outer left), 500 (inner left), 620 (inner right), 740 (outer right)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -58,20 +57,27 @@ parking_zones:
       - {id: "STF-02", category: "STAFF",   distance: 31, x: 740, y: 560}
 
 # ── Bay-camera assignment ─────────────────────────────────────────────────────
-# Cameras cover the 3 general rows (rows 2-4).
-# Entrance row (row 1) is close to gate and watched by the gate ALPR camera.
+# Each camera monitors only the specific bays listed under 'bays'.
+# Add or remove bay IDs freely - cameras do NOT need to cover full rows.
+# ROI pixel coordinates are set by:  python calibrate_bay_rois.py
+#
+# Available bay IDs:
+#   General  : G-01, G-02, G-03, G-04, G-05, G-06, G-07, G-08, G-09, G-10, G-11, G-12
+#   POD      : POD-01, POD-02
+#   Staff    : STF-01, STF-02
+#
 bay_cameras:
   - camera_index: 0
-    label: "Camera 0 - Row 4 (General, far)"
-    bays: [G-09, G-10, G-11, G-12]
+    label: "Camera 0"
+    bays: []   # <-- fill in the bay IDs this camera can see, e.g. [G-01, G-05]
 
   - camera_index: 1
-    label: "Camera 1 - Row 3 (General)"
-    bays: [G-05, G-06, G-07, G-08]
+    label: "Camera 1"
+    bays: []   # <-- fill in the bay IDs this camera can see
 
   - camera_index: 2
-    label: "Camera 2 - Row 2 (General)"
-    bays: [G-01, G-02, G-03, G-04]
+    label: "Camera 2"
+    bays: []   # <-- fill in the bay IDs this camera can see
 
 # System behaviour
 suggestion_mode: true

@@ -7,41 +7,8 @@
 #
 # That tool opens each camera, lets you drag rectangles over each bay,
 # and overwrites this file automatically.
+#
+# NOTE: Bay IDs here must match the 'bays' lists in camera_demo_config.yaml.
 
-cameras:
-
-  # ── Camera 0  (Row 4 – General, farthest) ────────────────────────────────
-  - camera_index: 0
-    bays:
-      - bay_id: G-09
-        roi: []        # [x1, y1, x2, y2]  fill via calibration tool
-      - bay_id: G-10
-        roi: []
-      - bay_id: G-11
-        roi: []
-      - bay_id: G-12
-        roi: []
-
-  # ── Camera 1  (Row 3 – General) ───────────────────────────────────────────
-  - camera_index: 1
-    bays:
-      - bay_id: G-05
-        roi: []
-      - bay_id: G-06
-        roi: []
-      - bay_id: G-07
-        roi: []
-      - bay_id: G-08
-        roi: []
-
-  # ── Camera 2  (Row 2 – General) ───────────────────────────────────────────
-  - camera_index: 2
-    bays:
-      - bay_id: G-01
-        roi: []
-      - bay_id: G-02
-        roi: []
-      - bay_id: G-03
-        roi: []
-      - bay_id: G-04
-        roi: []
+cameras: []
+# Populated automatically by calibrate_bay_rois.py once you run it.
