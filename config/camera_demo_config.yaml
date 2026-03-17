@@ -1,17 +1,17 @@
 # Camera Demo Configuration - Single Entrance, 16 Bays
 # 2 STAFF + 2 POD (entrance row)  +  12 GENERAL (3 rows x 4)  =  16 bays total
 #
-# Physical layout (matches cardboard mock-up):
+# Bay numbering goes column by column, nearest-to-farthest within each column:
 #
-#  Row 4 (farthest)   G-09   G-10   G-11   G-12   [General]
-#  Row 3              G-05   G-06   G-07   G-08   [General]
-#  Row 2              G-01   G-02   G-03   G-04   [General]
+#  Row 4 (farthest)   G-03   G-06   G-09   G-12   [General]
+#  Row 3              G-02   G-05   G-08   G-11   [General]
+#  Row 2              G-01   G-04   G-07   G-10   [General]
 #  Row 1 (entrance)   STF-01 POD-01 POD-02 STF-02 [Staff|POD|POD|Staff]
 #                              [MAIN ENTRANCE]
 #
 # SVG viewBox : 0 0 1200 850
 # Bay size    : 80 x 48 px
-# x positions: 380 (outer left), 500 (inner left), 620 (inner right), 740 (outer right)
+# x positions: 380, 500, 620, 740
 # ─────────────────────────────────────────────────────────────────────────────
 
 facility_name: "Smart Parking System - Camera Demo"
@@ -33,22 +33,22 @@ parking_zones:
 
     bays:
       # ── Row 4 (y=170) – General, farthest ────────────────────────────────
-      - {id: "G-09",   category: "GENERAL", distance: 85, x: 380, y: 170}
-      - {id: "G-10",   category: "GENERAL", distance: 87, x: 500, y: 170}
-      - {id: "G-11",   category: "GENERAL", distance: 89, x: 620, y: 170}
+      - {id: "G-03",   category: "GENERAL", distance: 85, x: 380, y: 170}
+      - {id: "G-06",   category: "GENERAL", distance: 87, x: 500, y: 170}
+      - {id: "G-09",   category: "GENERAL", distance: 89, x: 620, y: 170}
       - {id: "G-12",   category: "GENERAL", distance: 91, x: 740, y: 170}
 
       # ── Row 3 (y=300) – General ───────────────────────────────────────────
-      - {id: "G-05",   category: "GENERAL", distance: 60, x: 380, y: 300}
-      - {id: "G-06",   category: "GENERAL", distance: 62, x: 500, y: 300}
-      - {id: "G-07",   category: "GENERAL", distance: 64, x: 620, y: 300}
-      - {id: "G-08",   category: "GENERAL", distance: 66, x: 740, y: 300}
+      - {id: "G-02",   category: "GENERAL", distance: 60, x: 380, y: 300}
+      - {id: "G-05",   category: "GENERAL", distance: 62, x: 500, y: 300}
+      - {id: "G-08",   category: "GENERAL", distance: 64, x: 620, y: 300}
+      - {id: "G-11",   category: "GENERAL", distance: 66, x: 740, y: 300}
 
       # ── Row 2 (y=430) – General ───────────────────────────────────────────
       - {id: "G-01",   category: "GENERAL", distance: 40, x: 380, y: 430}
-      - {id: "G-02",   category: "GENERAL", distance: 42, x: 500, y: 430}
-      - {id: "G-03",   category: "GENERAL", distance: 44, x: 620, y: 430}
-      - {id: "G-04",   category: "GENERAL", distance: 46, x: 740, y: 430}
+      - {id: "G-04",   category: "GENERAL", distance: 42, x: 500, y: 430}
+      - {id: "G-07",   category: "GENERAL", distance: 44, x: 620, y: 430}
+      - {id: "G-10",   category: "GENERAL", distance: 46, x: 740, y: 430}
 
       # ── Row 1 (y=560) – Entrance row: Staff (outer) + POD (inner) ─────────
       - {id: "STF-01", category: "STAFF",   distance: 25, x: 380, y: 560}
@@ -58,18 +58,18 @@ parking_zones:
 
 # ── Bay-camera assignment ─────────────────────────────────────────────────────
 # Each camera monitors only the specific bays listed under 'bays'.
-# Add or remove bay IDs freely - cameras do NOT need to cover full rows.
+# Cameras do NOT need to cover full rows - assign only what each camera can see.
 # ROI pixel coordinates are set by:  python calibrate_bay_rois.py
 #
 # Available bay IDs:
-#   General  : G-01, G-02, G-03, G-04, G-05, G-06, G-07, G-08, G-09, G-10, G-11, G-12
+#   General  : G-01 .. G-12
 #   POD      : POD-01, POD-02
 #   Staff    : STF-01, STF-02
 #
 bay_cameras:
   - camera_index: 0
     label: "Camera 0"
-    bays: []   # <-- fill in the bay IDs this camera can see, e.g. [G-01, G-05]
+    bays: []   # <-- fill in the bay IDs this camera can see, e.g. [G-01, G-02]
 
   - camera_index: 1
     label: "Camera 1"
