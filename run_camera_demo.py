@@ -55,9 +55,7 @@ logger = logging.getLogger(__name__)
 CONFIG_PATH   = 'config/camera_demo_config.yaml'
 BAY_ROIS_PATH = 'config/bay_rois.yaml'
 GATE_ID       = 'GATE_MAIN'
-GATE_CAM_IDX  = 1   # Use camera index 3 for the gate (entrance) camera
-                     # so it does not clash with bay cameras 0/1/2.
-                     # Change to 0 if you only have one camera.
+GATE_CAM_IDX  = 0   # USB gate camera index. Change if you have multiple cameras.
 PARK_DELAY    = 5.0  # seconds after suggestion before confirming park
 
 
