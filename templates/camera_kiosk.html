@@ -51,6 +51,41 @@
         .welcome-message h2 { font-size: 2rem; }
         .welcome-message p.subtitle { font-size: 1.1rem; color: #94a3b8; }
 
+        /* ── Priority selection screen ── */
+        .priority-screen .plate-banner { margin-bottom: 32px; }
+        .priority-grid {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+        .priority-btn {
+            background: #1e293b;
+            border: 2px solid #334155;
+            border-radius: 20px;
+            padding: 28px 36px;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s;
+            min-width: 160px;
+        }
+        .priority-btn:hover { transform: scale(1.06); border-color: #60a5fa; }
+        .priority-btn .p-icon  { font-size: 3rem; }
+        .priority-btn .p-label { font-size: 1.1rem; font-weight: 700;
+                                  color: #f1f5f9; margin-top: 10px; }
+        .priority-btn .p-sub   { font-size: 0.8rem; color: #94a3b8; margin-top: 4px; }
+        .priority-btn.general  { border-color: #10b981; }
+        .priority-btn.pod      { border-color: #3b82f6; }
+        .priority-btn.staff    { border-color: #f59e0b; }
+        .priority-btn.general:hover { background: #064e3b; }
+        .priority-btn.pod:hover     { background: #1e3a5f; }
+        .priority-btn.staff:hover   { background: #451a03; }
+        .priority-prompt {
+            font-size: 1.3rem; font-weight: 600;
+            color: #e2e8f0; margin-bottom: 24px;
+        }
+
         /* Availability bar below scan area */
         .avail-bar {
             display: flex;
@@ -117,7 +152,40 @@
                 </div>
             </div>
 
-            <!-- ── Screen 2: Plate Detected → Suggestion ── -->
+            <!-- ── Screen 2: Priority Selection ── -->
+            <div class="screen priority-screen hidden" id="priorityScreen">
+                <div class="suggestion-header">
+                    <h2>PLATE DETECTED</h2>
+                </div>
+
+                <div style="text-align: center; margin: 12px 0;">
+                    <div class="plate-banner">
+                        <div class="plate-text" id="priorityPlateText">------</div>
+                    </div>
+                </div>
+
+                <p class="priority-prompt">Please select your parking category</p>
+
+                <div class="priority-grid">
+                    <button class="priority-btn general" onclick="selectPriority('GENERAL')">
+                        <div class="p-icon">🚗</div>
+                        <div class="p-label">Normal</div>
+                        <div class="p-sub">General Parking</div>
+                    </button>
+                    <button class="priority-btn pod" onclick="selectPriority('POD')">
+                        <div class="p-icon">♿</div>
+                        <div class="p-label">Accessible</div>
+                        <div class="p-sub">POD / Disability</div>
+                    </button>
+                    <button class="priority-btn staff" onclick="selectPriority('STAFF')">
+                        <div class="p-icon">👔</div>
+                        <div class="p-label">Staff</div>
+                        <div class="p-sub">Staff Parking</div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- ── Screen 3: Plate Detected → Suggestion ── -->
             <div class="screen suggestion-screen hidden" id="suggestionScreen">
                 <div class="suggestion-header">
                     <div class="selected-zone" id="detectedPlateLabel">Plate Detected</div>

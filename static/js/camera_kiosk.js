@@ -29,16 +29,23 @@ function initSocket() {
         refreshAvailability();
     });
 
-    // Camera is actively scanning (sent by run_camera_demo.py via bus)
+    // Camera is actively scanning
     socket.on('alpr_scanning', (data) => {
         console.log('📷 ALPR scanning');
-        if (currentScreen !== 'suggestion') {
-            // Only update to scanning if we're not already showing a suggestion
+        if (currentScreen !== 'suggestion' && currentScreen !== 'priority') {
             showScreen('scanning');
         }
     });
 
-    // Plate detected + suggestion ready
+    // Plate confirmed – show priority selection screen
+    socket.on('plate_detected', (data) => {
+        console.log('🚗 Plate detected:', data.plate);
+        const el = document.getElementById('priorityPlateText');
+        if (el) el.textContent = data.plate || '------';
+        showScreen('priority');
+    });
+
+    // Suggestion ready – show bay recommendation
     socket.on('suggestion_issued', (data) => {
         console.log('💡 Suggestion received:', data);
         showSuggestion(data);
@@ -124,6 +131,13 @@ function showSuggestion(data) {
         showScreen('scanning');
         suggestionTimeout = null;
     }, 25000);
+}
+
+function selectPriority(priority) {
+    console.log('Priority selected:', priority);
+    socket.emit('priority_selected', { priority: priority });
+    // Show a brief "processing" state while waiting for suggestion
+    showScreen('scanning');
 }
 
 function categoryBadge(cat) {

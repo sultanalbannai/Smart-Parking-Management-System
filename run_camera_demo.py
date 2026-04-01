@@ -19,6 +19,7 @@ Press 'q' in the gate-camera window to quit.
 import sys
 import time
 import uuid
+import queue
 import threading
 import webbrowser
 import logging
@@ -54,7 +55,7 @@ logger = logging.getLogger(__name__)
 CONFIG_PATH   = 'config/camera_demo_config.yaml'
 BAY_ROIS_PATH = 'config/bay_rois.yaml'
 GATE_ID       = 'GATE_MAIN'
-GATE_CAM_IDX  = 3   # Use camera index 3 for the gate (entrance) camera
+GATE_CAM_IDX  = 1   # Use camera index 3 for the gate (entrance) camera
                      # so it does not clash with bay cameras 0/1/2.
                      # Change to 0 if you only have one camera.
 PARK_DELAY    = 5.0  # seconds after suggestion before confirming park
@@ -62,16 +63,25 @@ PARK_DELAY    = 5.0  # seconds after suggestion before confirming park
 
 # ── Web server ────────────────────────────────────────────────────────────────
 
-def run_web_server(db_session, bus):
+def run_web_server(db_session, bus, priority_queue):
     import web_server_camera
-    web_server_camera.init_system(external_db=db_session, external_bus=bus)
+    web_server_camera.init_system(external_db=db_session, external_bus=bus,
+                                  priority_queue=priority_queue)
     web_server_camera.run_server(host='0.0.0.0', port=5000)
 
 
 # ── Gate-camera: one vehicle cycle ───────────────────────────────────────────
 
+PRIORITY_MAP = {
+    'GENERAL': PriorityClass.GENERAL,
+    'POD':     PriorityClass.POD,
+    'STAFF':   PriorityClass.STAFF,
+}
+
+
 def process_one_vehicle(camera, db_session, bus, recommendation,
-                        occupancy, confirmation, vehicle_number) -> bool:
+                        occupancy, confirmation, vehicle_number,
+                        priority_queue: queue.Queue) -> bool:
     """
     Auto-detect one plate at the gate, assign best bay, park after delay.
     Returns True to keep running, False to stop.
@@ -91,6 +101,26 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
 
     print(f"\n🚗 Gate plate: {plate_number}")
 
+    # Notify kiosk – it will show the priority selection screen
+    bus.publish('alpr/plate_detected', {'plate': plate_number, 'vehicle': vehicle_number})
+    print("⏳ Waiting for driver to select priority on kiosk…")
+
+    # Drain any stale value left from a previous round
+    while not priority_queue.empty():
+        try:
+            priority_queue.get_nowait()
+        except queue.Empty:
+            break
+
+    try:
+        priority_str = priority_queue.get(timeout=60)   # wait up to 60 s
+    except queue.Empty:
+        priority_str = 'GENERAL'                         # default if no selection
+        print("⚠️  No priority selected in time – defaulting to GENERAL")
+
+    priority_class = PRIORITY_MAP.get(priority_str.upper(), PriorityClass.GENERAL)
+    print(f"✅ Priority: {priority_class.value}")
+
     # Session
     session_id = str(uuid.uuid4())
     plate_hash = hash_plate(plate_number, session_id)
@@ -100,7 +130,7 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
         session_id        = session_id,
         gate_id           = GATE_ID,
         plate_hash        = plate_hash,
-        priority_class    = PriorityClass.GENERAL,
+        priority_class    = priority_class,
         selected_entrance = 'ENTRANCE_ANY',
         selected_zone     = 'ANY',
         created_at        = now,
@@ -112,7 +142,7 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
     bus.publish('parking/request', {
         'sessionId':     session_id,
         'gateId':        GATE_ID,
-        'priorityClass': PriorityClass.GENERAL.value,
+        'priorityClass': priority_class.value,
         'timestamp':     Clock.timestamp_ms()
     })
 
@@ -138,7 +168,7 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
         'sessionId':         session_id,
         'primaryBayId':      suggestion.primary_bay_id,
         'alternativeBayIds': alt_ids,
-        'priorityClass':     PriorityClass.GENERAL.value,
+        'priorityClass':     priority_class.value,
         'plate':             plate_number,
         'distance':          primary_bay.distance_from_gate if primary_bay else 0,
         'category':          primary_bay.category.value if primary_bay else 'GENERAL',
@@ -198,9 +228,13 @@ def main():
     occupancy      = OccupancyService(session, bus)
     confirmation   = ConfirmationService(session, bus)
 
+    # Priority queue shared between gate loop and web server
+    priority_queue = queue.Queue()
+
     # Web server
     print("\n🌐 Starting web server…")
-    threading.Thread(target=run_web_server, args=(session, bus), daemon=True).start()
+    threading.Thread(target=run_web_server, args=(session, bus, priority_queue),
+                     daemon=True).start()
     time.sleep(2)
 
     print("📊 Dashboard : http://127.0.0.1:5000")
@@ -271,13 +305,14 @@ def main():
     try:
         while True:
             keep_going = process_one_vehicle(
-                camera         = gate_cam,
-                db_session     = session,
-                bus            = bus,
-                recommendation = recommendation,
-                occupancy      = occupancy,
-                confirmation   = confirmation,
-                vehicle_number = vehicle_number,
+                camera          = gate_cam,
+                db_session      = session,
+                bus             = bus,
+                recommendation  = recommendation,
+                occupancy       = occupancy,
+                confirmation    = confirmation,
+                vehicle_number  = vehicle_number,
+                priority_queue  = priority_queue,
             )
             if not keep_going:
                 break

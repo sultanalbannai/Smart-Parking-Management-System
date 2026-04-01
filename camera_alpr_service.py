@@ -27,10 +27,10 @@ MIN_CONF            = 0.35   # minimum EasyOCR confidence to accept
 TRIGGER_COOLDOWN_SEC = 4.0   # seconds to ignore triggers after one fires
 
 # Centre trigger zone as fractions of (width, height)
-ZONE_LEFT   = 0.15
-ZONE_RIGHT  = 0.85
-ZONE_TOP    = 0.25
-ZONE_BOTTOM = 0.75
+ZONE_LEFT   = 0.25
+ZONE_RIGHT  = 0.75
+ZONE_TOP    = 0.30
+ZONE_BOTTOM = 0.70
 
 # Fraction of the zone that must be foreground to fire the snapshot
 FG_THRESHOLD = 0.12

@@ -21,14 +21,17 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 db_session: Session = None
 message_bus = None
+_priority_queue = None          # shared queue – filled when kiosk sends priority_selected
 
 
-def init_system(external_db=None, external_bus=None):
+def init_system(external_db=None, external_bus=None, priority_queue=None):
     """Initialize with shared DB + message bus instances."""
-    global db_session, message_bus
+    global db_session, message_bus, _priority_queue
 
     if external_db:
         db_session = external_db
+    if priority_queue is not None:
+        _priority_queue = priority_queue
     if external_bus:
         message_bus = external_bus
 
@@ -37,6 +40,7 @@ def init_system(external_db=None, external_bus=None):
         message_bus.subscribe('parking/suggestion',           on_suggestion)
         message_bus.subscribe('parking/bays/+/confirmation',  on_confirmation)
         message_bus.subscribe('alpr/scanning',                on_alpr_scanning)
+        message_bus.subscribe('alpr/plate_detected',          on_plate_detected)
         message_bus.subscribe('parking/bays/plate_logged',    on_plate_logged)
 
         logger.info("✅ Camera web server initialized")
@@ -102,6 +106,21 @@ def on_confirmation(topic, payload):
 def on_alpr_scanning(topic, payload):
     """Relayed to kiosk so it can show the 'scanning plate...' state."""
     socketio.emit('alpr_scanning', payload, namespace='/')
+
+
+def on_plate_detected(topic, payload):
+    """Plate confirmed at gate – tell kiosk to show priority selection screen."""
+    logger.info(f"Plate detected: {payload.get('plate')}")
+    socketio.emit('plate_detected', {'plate': payload.get('plate')}, namespace='/')
+
+
+@socketio.on('priority_selected')
+def handle_priority_selected(data):
+    """Kiosk sends the driver's chosen priority; unblock run_camera_demo."""
+    priority = data.get('priority', 'GENERAL').upper()
+    logger.info(f"Priority selected by driver: {priority}")
+    if _priority_queue is not None:
+        _priority_queue.put(priority)
 
 
 def on_plate_logged(topic, payload):
