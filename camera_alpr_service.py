@@ -27,10 +27,10 @@ MIN_CONF            = 0.35   # minimum EasyOCR confidence to accept
 TRIGGER_COOLDOWN_SEC = 4.0   # seconds to ignore triggers after one fires
 
 # Centre trigger zone as fractions of (width, height)
-ZONE_LEFT   = 0.25
-ZONE_RIGHT  = 0.75
-ZONE_TOP    = 0.30
-ZONE_BOTTOM = 0.70
+ZONE_LEFT   = 0.20
+ZONE_RIGHT  = 0.80
+ZONE_TOP    = 0.25
+ZONE_BOTTOM = 0.75
 
 # Fraction of the zone that must be foreground to fire the snapshot
 FG_THRESHOLD = 0.12
@@ -42,11 +42,13 @@ SETTLE_FRAMES = 8
 
 
 def _normalize(text: str) -> str:
-    return re.sub(r'[^A-Z0-9]', '', text.upper())
+    """Strip to digits only."""
+    return re.sub(r'[^0-9]', '', text)
 
 
 def _is_plausible_plate(text: str) -> bool:
-    return 2 <= len(text) <= 10
+    """Accept only pure numeric plates, 2–10 digits."""
+    return 2 <= len(text) <= 10 and text.isdigit()
 
 
 class CameraALPRService:
