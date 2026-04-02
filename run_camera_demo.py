@@ -99,8 +99,6 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
 
     print(f"\n🚗 Gate plate: {plate_number}")
 
-    # Notify kiosk – it will show the priority selection screen
-    bus.publish('alpr/plate_detected', {'plate': plate_number, 'vehicle': vehicle_number})
     print("⏳ Waiting for driver to select priority on kiosk…")
 
     # Drain any stale value left from a previous round
@@ -110,11 +108,22 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
         except queue.Empty:
             break
 
+    # Keep re-publishing plate_detected every 2 s so the kiosk always shows
+    # the priority screen even if it missed the first event
+    stop_repeat = threading.Event()
+    def _repeat():
+        while not stop_repeat.is_set():
+            bus.publish('alpr/plate_detected', {'plate': plate_number, 'vehicle': vehicle_number})
+            stop_repeat.wait(timeout=2.0)
+    threading.Thread(target=_repeat, daemon=True).start()
+
     try:
-        priority_str = priority_queue.get(timeout=60)   # wait up to 60 s
+        priority_str = priority_queue.get(timeout=180)  # wait up to 3 minutes
     except queue.Empty:
         priority_str = 'GENERAL'                         # default if no selection
         print("⚠️  No priority selected in time – defaulting to GENERAL")
+    finally:
+        stop_repeat.set()
 
     priority_class = PRIORITY_MAP.get(priority_str.upper(), PriorityClass.GENERAL)
     print(f"✅ Priority: {priority_class.value}")
@@ -144,10 +153,18 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
         'timestamp':     Clock.timestamp_ms()
     })
 
-    # Recommendation
+    # Recommendation – if selected priority is full, fall back to GENERAL
     suggestion = recommendation.generate_suggestion(
         session=session, gate_id=GATE_ID, num_alternatives=2
     )
+
+    if not suggestion and priority_class != PriorityClass.GENERAL:
+        print(f"⚠️  No {priority_class.value} bays available – falling back to GENERAL")
+        session.priority_class = PriorityClass.GENERAL
+        db_session.commit()
+        suggestion = recommendation.generate_suggestion(
+            session=session, gate_id=GATE_ID, num_alternatives=2
+        )
 
     if not suggestion:
         print("⚠️  No available bays – lot may be full!")

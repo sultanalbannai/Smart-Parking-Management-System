@@ -87,9 +87,10 @@ def on_suggestion(topic, payload):
             pass
 
     socketio.emit('suggestion_issued', {
-        'bayId':      bay_id,
-        'sessionId':  payload.get('sessionId'),
-        'priority':   payload.get('priorityClass'),
+        'bayId':        bay_id,
+        'sessionId':    payload.get('sessionId'),
+        'priority':     payload.get('priorityClass'),
+        'plate':        payload.get('plate', ''),
         'alternatives': payload.get('alternativeBayIds', []),
         **extra
     }, namespace='/')

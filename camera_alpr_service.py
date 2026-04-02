@@ -3,10 +3,11 @@ Real Camera ALPR Service - USB Camera Integration
 Captures frames from USB camera and performs license plate recognition using EasyOCR.
 
 Detection strategy:
-  1. Background subtractor watches the centre zone of the frame.
-  2. When a vehicle fills that zone, ONE snapshot is taken.
-  3. EasyOCR runs once on that snapshot and the plate is returned.
-  No streak / repeated-frame logic – a single sharp photo is used.
+  1. Captures a reference of the empty scene at startup.
+  2. Compares every live frame against that reference – car is detected
+     even when completely stationary (no background adaption issue).
+  3. Waits for the car to stop moving, then snaps ONE frame.
+  4. EasyOCR runs once on that snapshot and the plate is returned.
 """
 
 import re
@@ -137,25 +138,44 @@ class CameraALPRService:
     def wait_for_vehicle(self, timeout: int = 300) -> Tuple[Optional[str], Optional[np.ndarray]]:
         """
         Show live camera feed.
-        When a vehicle fills the centre zone, snap ONE frame and run OCR.
+        Captures a reference of the empty scene, then compares every frame
+        against it – so a stationary car is always detected regardless of
+        how long it stays still.
+        Snaps ONE frame once the car has stopped moving, runs OCR once.
         Returns (plate_text, frame) or (None, None) if 'q' pressed / timeout.
         """
         if not self.is_camera_ready:
             logger.error("Camera not ready")
             return None, None
 
+        logger.info("Capturing empty-scene reference...")
+
+        # Warm up camera and capture a clean reference of the empty zone
+        for _ in range(20):
+            self.capture_frame()
+        ref_frame = self.capture_frame()
+        if ref_frame is None:
+            logger.error("Could not capture reference frame")
+            return None, None
+
+        h, w = ref_frame.shape[:2]
+        zx1  = int(w * ZONE_LEFT)
+        zx2  = int(w * ZONE_RIGHT)
+        zy1  = int(h * ZONE_TOP)
+        zy2  = int(h * ZONE_BOTTOM)
+        zone_area = max(1, (zx2 - zx1) * (zy2 - zy1))
+
+        ref_gray = cv2.cvtColor(ref_frame[zy1:zy2, zx1:zx2], cv2.COLOR_BGR2GRAY)
+        ref_gray = cv2.GaussianBlur(ref_gray, (5, 5), 0)
+
         logger.info("Waiting for vehicle – centre-snap mode  |  'q' to quit")
 
-        # Background subtractor – adapts to the empty scene quickly
-        bg_sub = cv2.createBackgroundSubtractorMOG2(
-            history=100, varThreshold=40, detectShadows=False
-        )
-
-        start_time    = datetime.now()
-        last_trigger  = 0.0
-        settle_count  = 0      # counts frames with presence detected
-        snap_frame    = None   # frozen frame waiting for OCR
-        snapped       = False  # True while we are processing a snapshot
+        start_time   = datetime.now()
+        last_trigger = 0.0
+        settle_count = 0       # frames where car is present AND not moving
+        prev_gray    = None    # previous frame's zone (for motion detection)
+        snap_frame   = None
+        snapped      = False
 
         while True:
             if (datetime.now() - start_time).seconds > timeout:
@@ -167,40 +187,46 @@ class CameraALPRService:
             if frame is None:
                 continue
 
-            h, w = frame.shape[:2]
-
-            # Compute centre zone pixel coordinates
-            zx1 = int(w * ZONE_LEFT)
-            zx2 = int(w * ZONE_RIGHT)
-            zy1 = int(h * ZONE_TOP)
-            zy2 = int(h * ZONE_BOTTOM)
-
             display = frame.copy()
 
             if not snapped:
-                # ── Check for vehicle presence in centre zone ─────────────
-                fg_mask  = bg_sub.apply(frame)
-                zone_fg  = fg_mask[zy1:zy2, zx1:zx2]
-                zone_area = max(1, (zx2 - zx1) * (zy2 - zy1))
-                fg_ratio  = np.count_nonzero(zone_fg) / zone_area
+                zone     = frame[zy1:zy2, zx1:zx2]
+                curr_gray = cv2.cvtColor(zone, cv2.COLOR_BGR2GRAY)
+                curr_gray = cv2.GaussianBlur(curr_gray, (5, 5), 0)
 
-                vehicle_present = fg_ratio >= FG_THRESHOLD
+                # ── 1. Car presence: compare against empty reference ──────
+                diff_ref = cv2.absdiff(ref_gray, curr_gray)
+                _, thr_ref = cv2.threshold(diff_ref, 25, 255, cv2.THRESH_BINARY)
+                fg_ratio = np.count_nonzero(thr_ref) / zone_area
 
-                if vehicle_present:
+                car_present = fg_ratio >= FG_THRESHOLD
+
+                # ── 2. Motion: compare against previous frame ─────────────
+                car_moving = False
+                if prev_gray is not None:
+                    diff_motion = cv2.absdiff(prev_gray, curr_gray)
+                    _, thr_mot  = cv2.threshold(diff_motion, 15, 255, cv2.THRESH_BINARY)
+                    motion_ratio = np.count_nonzero(thr_mot) / zone_area
+                    car_moving   = motion_ratio >= 0.03   # >3 % pixels changed
+
+                prev_gray = curr_gray
+
+                # Increment settle only when car is present AND still
+                if car_present and not car_moving:
                     settle_count += 1
-                else:
-                    settle_count = 0
+                elif not car_present:
+                    settle_count = 0   # car left
+                # (keep settle_count if car present but briefly moving)
 
                 now = time.time()
                 if settle_count >= SETTLE_FRAMES and (now - last_trigger) >= TRIGGER_COOLDOWN_SEC:
-                    # Car is centred and steady – take the snapshot
-                    snap_frame = frame.copy()
-                    snapped    = True
+                    snap_frame   = frame.copy()
+                    snapped      = True
                     settle_count = 0
-                    logger.info("Vehicle centred – snapping frame for OCR...")
+                    logger.info("Vehicle settled – snapping frame for OCR...")
 
-                # ── Overlay: zone box + presence indicator ────────────────
-                colour = (0, 220, 0) if vehicle_present else (0, 120, 255)
+                # ── Overlay ───────────────────────────────────────────────
+                colour = (0, 220, 0) if car_present else (0, 120, 255)
                 cv2.rectangle(display, (zx1, zy1), (zx2, zy2), colour, 2)
 
                 bar_w = int(min(fg_ratio / FG_THRESHOLD, 1.0) * (zx2 - zx1))
@@ -210,16 +236,16 @@ class CameraALPRService:
                 cv2.putText(display, "Drive into the box  |  'q' to quit",
                             (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 220, 0), 2)
 
-                if vehicle_present:
-                    cv2.putText(display,
-                                f"Vehicle detected – steadying... ({settle_count}/{SETTLE_FRAMES})",
+                if car_present:
+                    status = "Moving..." if car_moving else f"Settling... ({settle_count}/{SETTLE_FRAMES})"
+                    cv2.putText(display, status,
                                 (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 220, 0), 2)
                 else:
                     cv2.putText(display, "Scanning...",
                                 (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 120, 255), 2)
 
             else:
-                # ── Show the frozen snapshot and run OCR ──────────────────
+                # ── Show frozen snapshot and run OCR ──────────────────────
                 display = snap_frame.copy()
                 cv2.rectangle(display, (zx1, zy1), (zx2, zy2), (0, 200, 255), 3)
                 cv2.putText(display, "SNAP – reading plate...",
@@ -235,15 +261,14 @@ class CameraALPRService:
                     cv2.destroyAllWindows()
                     return plate, snap_frame
                 else:
-                    # OCR found nothing – show feedback and resume scanning
                     logger.info("Snap: no plate found – resuming scan")
                     cv2.putText(display, "No plate found – reposition",
                                 (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 60, 255), 2)
                     cv2.imshow('Gate Camera – ALPR', display)
                     cv2.waitKey(800)
-                    snapped    = False
-                    snap_frame = None
-                    last_trigger = time.time()  # brief cooldown before next snap
+                    snapped      = False
+                    snap_frame   = None
+                    last_trigger = time.time()
                     continue
 
             cv2.imshow('Gate Camera – ALPR', display)

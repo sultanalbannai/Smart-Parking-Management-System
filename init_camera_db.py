@@ -63,6 +63,13 @@ for zone in cfg['parking_zones']:
         category_counts[cat] = category_counts.get(cat, 0) + 1
         total_bays += 1
 
+# ── Pre-fill demo scenario: mark select bays as already occupied ──────────────
+DEMO_OCCUPIED = {'STF-01', 'POD-02', 'G-01', 'G-02', 'G-05', 'G-06', 'G-07', 'G-08'}
+
+for bay in session.query(Bay).all():
+    if bay.id in DEMO_OCCUPIED:
+        bay.state = BayState.UNAVAILABLE
+
 session.commit()
 
 print(f"\n[OK] Database initialized!")
@@ -73,6 +80,7 @@ for cat, count in category_counts.items():
         pct = count / total_bays * 100
         print(f"   {cat:8} : {count:2} bays ({pct:.0f}%)")
 
+print(f"   Pre-occupied: {', '.join(sorted(DEMO_OCCUPIED))}")
 print(f"\n[*] Entrance: {cfg['parking_zones'][0]['entrance_name']}")
 print(f"\n[OK] Ready for camera demo!")
 print("   Run: python run_camera_demo.py")
