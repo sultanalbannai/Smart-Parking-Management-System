@@ -54,6 +54,101 @@
         .cat-badge.POD     { background: #7c3aed22; color: #a78bfa; border: 1px solid #7c3aed44; }
         .cat-badge.STAFF   { background: #0369a122; color: #38bdf8; border: 1px solid #0369a144; }
         .cat-badge.GENERAL { background: #05966922; color: #34d399; border: 1px solid #05966944; }
+
+        /* ── Bay detail modal ────────────────────────────────────────────── */
+        .parking-bay { cursor: pointer; }
+        .parking-bay:hover rect { stroke-width: 3 !important; filter: brightness(1.3); }
+
+        .bay-modal-backdrop {
+            display: none;
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.65);
+            z-index: 1000;
+            align-items: center; justify-content: center;
+        }
+        .bay-modal-backdrop.open { display: flex; }
+        .bay-modal {
+            background: #0f172a;
+            border: 2px solid #3b82f6;
+            border-radius: 14px;
+            padding: 28px 32px;
+            min-width: 340px;
+            max-width: 420px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+            color: #e2e8f0;
+            position: relative;
+        }
+        .bay-modal h2 {
+            margin: 0 0 4px;
+            font-size: 2rem;
+            color: #60a5fa;
+            letter-spacing: 2px;
+        }
+        .bay-modal .bm-cat {
+            display: inline-block;
+            font-size: 0.75rem;
+            padding: 3px 10px;
+            border-radius: 10px;
+            background: #1e3a5f;
+            color: #93c5fd;
+            margin-bottom: 16px;
+            letter-spacing: 1px;
+        }
+        .bay-modal .bm-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #1e293b;
+            font-size: 0.92rem;
+        }
+        .bay-modal .bm-row:last-child { border-bottom: none; }
+        .bay-modal .bm-label { color: #94a3b8; }
+        .bay-modal .bm-value { color: #f1f5f9; font-weight: 600; }
+        .bay-modal .bm-plate {
+            display: block;
+            margin-top: 14px;
+            padding: 14px;
+            background: #1e3a5f;
+            border: 2px solid #3b82f6;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 1.6rem;
+            font-weight: 700;
+            letter-spacing: 5px;
+            text-align: center;
+            color: #fff;
+        }
+        .bay-modal .bm-plate.empty {
+            background: #1e293b;
+            border-color: #334155;
+            color: #64748b;
+            font-size: 0.95rem;
+            letter-spacing: 1px;
+            font-family: inherit;
+        }
+        .bay-modal .bm-state {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+        .bay-modal .bm-state.AVAILABLE   { background: #05966933; color: #34d399; border: 1px solid #10b981; }
+        .bay-modal .bm-state.UNAVAILABLE { background: #dc262633; color: #f87171; border: 1px solid #ef4444; }
+        .bay-modal .bm-state.PENDING     { background: #d9770633; color: #fbbf24; border: 1px solid #f59e0b; }
+        .bay-modal .bm-state.UNKNOWN     { background: #47556933; color: #94a3b8; border: 1px solid #64748b; }
+        .bay-modal .bm-close {
+            position: absolute;
+            top: 12px; right: 16px;
+            background: none;
+            border: none;
+            color: #94a3b8;
+            font-size: 1.6rem;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .bay-modal .bm-close:hover { color: #f1f5f9; }
     </style>
 </head>
 <body>
@@ -202,6 +297,31 @@
                 </div>
             </aside>
 
+        </div>
+    </div>
+
+    <!-- Bay detail modal -->
+    <div class="bay-modal-backdrop" id="bayModalBackdrop">
+        <div class="bay-modal">
+            <button class="bm-close" id="bmClose">&times;</button>
+            <h2 id="bmBayId">--</h2>
+            <span class="bm-cat" id="bmCategory">GENERAL</span>
+            <div class="bm-row">
+                <span class="bm-label">State</span>
+                <span class="bm-state" id="bmState">-</span>
+            </div>
+            <div class="bm-row">
+                <span class="bm-label">Distance from gate</span>
+                <span class="bm-value" id="bmDistance">-</span>
+            </div>
+            <div class="bm-row">
+                <span class="bm-label">Last update</span>
+                <span class="bm-value" id="bmUpdate">-</span>
+            </div>
+            <div class="bm-row" style="flex-direction:column; align-items:stretch;">
+                <span class="bm-label" style="margin-bottom:4px;">License plate</span>
+                <span class="bm-plate empty" id="bmPlate">Not parked</span>
+            </div>
         </div>
     </div>
 

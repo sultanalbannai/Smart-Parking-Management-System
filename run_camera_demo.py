@@ -39,6 +39,8 @@ from src.services.confirmation import ConfirmationService
 from camera_alpr_service import CameraALPRService
 from bay_camera_service import load_bay_cameras
 
+import cv2
+import numpy as np
 import yaml
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -56,7 +58,6 @@ CONFIG_PATH   = 'config/camera_demo_config.yaml'
 BAY_ROIS_PATH = 'config/bay_rois.yaml'
 GATE_ID       = 'GATE_MAIN'
 GATE_CAM_IDX  = 0   # USB gate camera index. Change if you have multiple cameras.
-PARK_DELAY    = 5.0  # seconds after suggestion before confirming park
 
 
 # ── Web server ────────────────────────────────────────────────────────────────
@@ -77,9 +78,65 @@ PRIORITY_MAP = {
 }
 
 
+BAY_MON_WIN = "Bay Cameras – Live Monitor  |  q = quit"
+TILE_W, TILE_H = 640, 360
+
+
+def _build_bay_tiles(bay_cam_services) -> np.ndarray:
+    """
+    Build a tiled image of all bay camera feeds (does NOT call imshow/waitKey).
+    Safe to call from any thread; imshow must be called from the main thread only.
+    """
+    tiles = []
+    for svc in bay_cam_services:
+        frame = svc.get_latest_frame()
+        if frame is None:
+            frame = np.zeros((TILE_H, TILE_W, 3), dtype=np.uint8)
+            cv2.putText(frame, f"{svc.label} – no feed",
+                        (20, TILE_H // 2), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7, (100, 100, 100), 2)
+        else:
+            frame = cv2.resize(frame, (TILE_W, TILE_H))
+
+        orig_h, orig_w = 720, 1280
+        sx, sy = TILE_W / orig_w, TILE_H / orig_h
+
+        for bay_id in svc.bay_ids:
+            roi = svc.rois.get(bay_id)
+            if roi:
+                x1, y1, x2, y2 = roi
+                tx1 = int(x1 * sx); ty1 = int(y1 * sy)
+                tx2 = int(x2 * sx); ty2 = int(y2 * sy)
+                occupied = svc._current_state.get(bay_id, False)
+                colour   = (0, 0, 220) if occupied else (0, 220, 0)
+                status   = "OCCUPIED" if occupied else "AVAILABLE"
+                cv2.rectangle(frame, (tx1, ty1), (tx2, ty2), colour, 3)
+                cv2.putText(frame, f"{bay_id}: {status}",
+                            (tx1, max(ty1 - 8, 16)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, colour, 2)
+
+        cv2.putText(frame, svc.label, (10, 24),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        tiles.append(frame)
+
+    n = len(tiles)
+    if n == 0:
+        return np.zeros((TILE_H, TILE_W, 3), dtype=np.uint8)
+    if n == 1:
+        return tiles[0]
+    if n == 2:
+        return np.hstack(tiles)
+    cols = 2
+    while len(tiles) % cols:
+        tiles.append(np.zeros((TILE_H, TILE_W, 3), dtype=np.uint8))
+    rows = [np.hstack(tiles[i:i+cols]) for i in range(0, len(tiles), cols)]
+    return np.vstack(rows)
+
+
 def process_one_vehicle(camera, db_session, bus, recommendation,
                         occupancy, confirmation, vehicle_number,
-                        priority_queue: queue.Queue) -> bool:
+                        priority_queue: queue.Queue,
+                        bay_cam_services=None) -> bool:
     """
     Auto-detect one plate at the gate, assign best bay, park after delay.
     Returns True to keep running, False to stop.
@@ -91,7 +148,11 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
 
     bus.publish('alpr/scanning', {'status': 'scanning', 'vehicle': vehicle_number})
 
-    plate_number, _frame = camera.wait_for_vehicle(timeout=300)
+    # Bay frame callback – called by gate camera display loop so bay cams
+    # render in the SAME thread (avoids OpenCV multi-thread deadlock on Windows)
+    get_bay_frame = (lambda: _build_bay_tiles(bay_cam_services)) if bay_cam_services else None
+
+    plate_number, _frame = camera.wait_for_vehicle(timeout=300, get_bay_frame=get_bay_frame)
 
     if plate_number is None:
         logger.info("Gate camera: quit or timeout")
@@ -117,13 +178,27 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
             stop_repeat.wait(timeout=2.0)
     threading.Thread(target=_repeat, daemon=True).start()
 
+    # Poll for priority while pumping bay camera display from the MAIN thread
+    priority_str = None
+    deadline = time.time() + 180
     try:
-        priority_str = priority_queue.get(timeout=180)  # wait up to 3 minutes
-    except queue.Empty:
-        priority_str = 'GENERAL'                         # default if no selection
-        print("⚠️  No priority selected in time – defaulting to GENERAL")
+        while time.time() < deadline:
+            try:
+                priority_str = priority_queue.get(timeout=0.033)
+                break
+            except queue.Empty:
+                pass
+            if bay_cam_services:
+                cv2.imshow(BAY_MON_WIN, _build_bay_tiles(bay_cam_services))
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    stop_repeat.set()
+                    return False
     finally:
         stop_repeat.set()
+
+    if priority_str is None:
+        priority_str = 'GENERAL'
+        print("⚠️  No priority selected in time – defaulting to GENERAL")
 
     priority_class = PRIORITY_MAP.get(priority_str.upper(), PriorityClass.GENERAL)
     print(f"✅ Priority: {priority_class.value}")
@@ -189,26 +264,8 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
         'category':          primary_bay.category.value if primary_bay else 'GENERAL',
     })
 
-    # Wait, then confirm parking (bay cameras will also detect this independently)
-    print(f"\n⏳ {PARK_DELAY:.0f}s delay (driver walking to bay)…")
-    time.sleep(PARK_DELAY)
-
-    occupancy.mark_bay_occupied(bay_id=suggestion.primary_bay_id, plate_hash=plate_hash)
-    confirmation.confirm_bay_occupancy(
-        bay_id=suggestion.primary_bay_id, plate_hash=plate_hash, confidence=0.95
-    )
-    recommendation.assign_plate_to_bay(plate_hash=plate_hash, bay_id=suggestion.primary_bay_id)
-
-    db_session.expire_all()
-    available = db_session.query(Bay).filter(Bay.state == BayState.AVAILABLE).count()
-    total     = db_session.query(Bay).count()
-
-    print(f"\n✅ {suggestion.primary_bay_id} OCCUPIED   remaining: {available}/{total}")
-
-    if available == 0:
-        print("\n🅿️  Parking lot FULL")
-        return False
-
+    # Bay cameras handle occupancy via the live monitor window.
+    print(f"\n✅ Suggestion issued – bay cameras will confirm when car arrives at {suggestion.primary_bay_id}")
     return True
 
 
@@ -281,6 +338,7 @@ def main():
         for svc in bay_cam_services:
             svc.start()
         print(f"✅ {len(bay_cam_services)} bay camera(s) running in background")
+        print("✅ Bay monitor will display alongside gate camera (main thread)")
     except Exception as e:
         print(f"⚠️  Bay cameras failed to start: {e}")
         print("   Continuing without bay cameras…")
@@ -320,14 +378,15 @@ def main():
     try:
         while True:
             keep_going = process_one_vehicle(
-                camera          = gate_cam,
-                db_session      = session,
-                bus             = bus,
-                recommendation  = recommendation,
-                occupancy       = occupancy,
-                confirmation    = confirmation,
-                vehicle_number  = vehicle_number,
-                priority_queue  = priority_queue,
+                camera            = gate_cam,
+                db_session        = session,
+                bus               = bus,
+                recommendation    = recommendation,
+                occupancy         = occupancy,
+                confirmation      = confirmation,
+                vehicle_number    = vehicle_number,
+                priority_queue    = priority_queue,
+                bay_cam_services  = bay_cam_services,
             )
             if not keep_going:
                 break
@@ -338,6 +397,7 @@ def main():
         print("\n\n👋 Interrupted")
 
     finally:
+        cv2.destroyAllWindows()
         gate_cam.stop_camera()
         for svc in bay_cam_services:
             svc.stop()

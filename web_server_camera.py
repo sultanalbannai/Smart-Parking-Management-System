@@ -167,12 +167,56 @@ def get_bays():
                 'entrance_name': bay.entrance_name,
                 'entrance_color': bay.entrance_color,
                 'x':           bay.coordinates_x,
-                'y':           bay.coordinates_y
+                'y':           bay.coordinates_y,
+                'plate':       bay.parked_plate,
             }
             for bay in bays
         },
         'timestamp': Clock.now().isoformat()
     })
+
+
+@app.route('/api/bay/<bay_id>')
+def get_bay(bay_id):
+    """Return full detail for one bay (used by dashboard bay-click popup)."""
+    if not db_session:
+        return jsonify({'error': 'DB not ready'}), 500
+
+    db_session.expire_all()
+    bay = db_session.query(Bay).filter(Bay.id == bay_id).first()
+    if not bay:
+        return jsonify({'error': 'Bay not found'}), 404
+
+    return jsonify({
+        'id':             bay.id,
+        'state':          bay.state.value if bay.state else 'UNKNOWN',
+        'category':       bay.category.value if bay.category else 'GENERAL',
+        'distance':       bay.distance_from_gate,
+        'plate':          bay.parked_plate,
+        'last_update':    bay.last_update_time.isoformat() if bay.last_update_time else None,
+        'occupied_since': bay.occupied_since.isoformat() if bay.occupied_since else None,
+    })
+
+
+@app.route('/api/find_plate/<plate>')
+def find_plate(plate):
+    """Search which bay a given plate number is currently parked in."""
+    if not db_session:
+        return jsonify({'error': 'DB not ready'}), 500
+
+    plate = plate.strip().upper()
+    db_session.expire_all()
+    bay = db_session.query(Bay).filter(Bay.parked_plate == plate).first()
+
+    if bay:
+        return jsonify({
+            'found':    True,
+            'plate':    plate,
+            'bayId':    bay.id,
+            'category': bay.category.value if bay.category else 'GENERAL',
+            'distance': bay.distance_from_gate,
+        })
+    return jsonify({'found': False, 'plate': plate})
 
 
 @app.route('/api/stats')
@@ -217,7 +261,8 @@ def handle_connect():
                         'entrance_name': bay.entrance_name,
                         'entrance_color': bay.entrance_color,
                         'x':           bay.coordinates_x,
-                        'y':           bay.coordinates_y
+                        'y':           bay.coordinates_y,
+                        'plate':       bay.parked_plate,
                     }
                     for bay in bays
                 },

@@ -1,12 +1,14 @@
 """
 Bay Camera Service
 ==================
-Monitors a group of parking bays using one USB camera.
-- YOLOv8  → detects whether a vehicle is present in each bay's ROI
-- EasyOCR → reads the plate inside each occupied ROI for logging
+Monitors a parking bay using one USB camera.
+- YOLOv8  → detects whether a vehicle is present in the bay's ROI
+- EasyOCR → reads the plate number when a car parks
+
+The plate is saved to Bay.parked_plate in the database so it can be
+looked up later (e.g. "which bay is plate 12345 in?").
 
 One BayCameraService instance per physical camera.
-Run each in its own daemon thread (see run_camera_demo.py).
 
 Dependencies:
     pip install ultralytics easyocr opencv-python
@@ -21,30 +23,32 @@ import cv2
 import numpy as np
 import easyocr
 from pathlib import Path
-from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# ── Tuning constants ──────────────────────────────────────────────────────────
-YOLO_CONF           = 0.45   # minimum YOLO detection confidence
-VEHICLE_CLASSES     = {2, 5, 7}   # COCO: car=2, bus=5, truck=7
-OCR_EVERY_N_FRAMES  = 30     # run plate OCR every N frames (~1 s at 30 fps)
-DEBOUNCE_COUNT      = 4      # consecutive same-state frames to commit a change
-MIN_PLATE_LEN       = 2
-MAX_PLATE_LEN       = 10
+# ── Tuning ────────────────────────────────────────────────────────────────────
+YOLO_CONF          = 0.45        # minimum YOLO detection confidence
+VEHICLE_CLASSES    = {2, 5, 7}  # COCO: car=2, bus=5, truck=7
+DEBOUNCE_COUNT     = 4           # consecutive same-state frames to commit
+OCR_EVERY_N_FRAMES = 30          # run plate OCR every N frames (~1 s @ 30 fps)
+MIN_CONF           = 0.35        # minimum EasyOCR confidence
+
+# Background-subtraction fallback (catches toy/model cars YOLO misses)
+BG_FG_THRESHOLD    = 0.10        # fraction of ROI pixels that must change
+BG_PIXEL_THRESH    = 25          # grayscale diff threshold per pixel
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def _normalize(text: str) -> str:
-    return re.sub(r'[^A-Z0-9]', '', text.upper())
+    """Keep digits only (matching gate ALPR behaviour)."""
+    return re.sub(r'[^0-9]', '', text)
 
 
 def _vehicle_in_roi(results, roi: Tuple[int, int, int, int]) -> Tuple[bool, float]:
     """
-    Return (occupied, confidence) by checking whether any YOLO vehicle
-    detection box overlaps the ROI by at least 20 %.
-    roi = (x1, y1, x2, y2) in pixel coordinates.
+    Return (occupied, confidence) – True when a YOLO vehicle box overlaps
+    the ROI by at least 20 %.
     """
     rx1, ry1, rx2, ry2 = roi
     roi_area = max(1, (rx2 - rx1) * (ry2 - ry1))
@@ -57,13 +61,11 @@ def _vehicle_in_roi(results, roi: Tuple[int, int, int, int]) -> Tuple[bool, floa
         conf = float(box.conf[0])
         bx1, by1, bx2, by2 = map(int, box.xyxy[0])
 
-        # Intersection area
         ix1, iy1 = max(rx1, bx1), max(ry1, by1)
         ix2, iy2 = min(rx2, bx2), min(ry2, by2)
-        inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+        inter    = max(0, ix2 - ix1) * max(0, iy2 - iy1)
 
-        overlap = inter / roi_area
-        if overlap >= 0.20 and conf > best_conf:
+        if inter / roi_area >= 0.20 and conf > best_conf:
             best_conf = conf
 
     return best_conf >= YOLO_CONF, best_conf
@@ -71,59 +73,48 @@ def _vehicle_in_roi(results, roi: Tuple[int, int, int, int]) -> Tuple[bool, floa
 
 class BayCameraService:
     """
-    Monitors one camera covering a fixed set of bays.
-
-    Parameters
-    ----------
-    camera_index : int
-        OpenCV camera device index.
-    bay_ids : list[str]
-        Bay IDs covered by this camera (e.g. ["G-01", "G-02", ...]).
-    rois : dict[str, tuple]
-        Mapping bay_id → (x1, y1, x2, y2) pixel rectangle in the camera frame.
-    occupancy_service :
-        OccupancyService instance (mark_bay_occupied / mark_bay_vacant).
-    bus :
-        MessageBus instance (for publishing plate_logged events).
-    db_session :
-        SQLAlchemy session for plate-hash lookups.
-    label : str
-        Human-readable label for log messages.
+    Monitors one camera watching one (or more) specific bays.
+    Updates occupancy and saves the detected plate to the database.
     """
 
     def __init__(self, camera_index: int, bay_ids: List[str],
                  rois: Dict[str, Tuple[int, int, int, int]],
                  occupancy_service, bus, db_session, label: str = ""):
-        self.camera_index     = camera_index
-        self.bay_ids          = bay_ids
-        self.rois             = rois          # bay_id → (x1,y1,x2,y2)
-        self.occupancy        = occupancy_service
-        self.bus              = bus
-        self.db               = db_session
-        self.label            = label or f"BayCam-{camera_index}"
+        self.camera_index = camera_index
+        self.bay_ids      = bay_ids
+        self.rois         = rois
+        self.occupancy    = occupancy_service
+        self.bus          = bus
+        self.db           = db_session
+        self.label        = label or f"BayCam-{camera_index}"
 
-        self._stop_event      = threading.Event()
+        self._stop_event  = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
         # Per-bay debounce counters
-        self._occ_streak:  Dict[str, int] = {b: 0 for b in bay_ids}
-        self._free_streak: Dict[str, int] = {b: 0 for b in bay_ids}
+        self._occ_streak:    Dict[str, int]  = {b: 0 for b in bay_ids}
+        self._free_streak:   Dict[str, int]  = {b: 0 for b in bay_ids}
         self._current_state: Dict[str, bool] = {b: False for b in bay_ids}
 
-        # Load models (shared across calls)
+        # Latest frame buffer (for external preview)
+        self._latest_frame: Optional[np.ndarray] = None
+        self._frame_lock = threading.Lock()
+
+        # One-shot callbacks: bay_id → callable, fired once on occupied
+        self._occupied_callbacks: Dict[str, callable] = {}
+
         logger.info(f"[{self.label}] Loading YOLOv8n …")
         from ultralytics import YOLO
-        self._yolo = YOLO("yolov8n.pt")   # downloads on first run (~6 MB)
+        self._yolo = YOLO("yolov8n.pt")
 
         logger.info(f"[{self.label}] Loading EasyOCR …")
         self._ocr = easyocr.Reader(['en'], gpu=False, verbose=False)
 
-        logger.info(f"[{self.label}] Ready – bays: {bay_ids}")
+        logger.info(f"[{self.label}] Ready – watching bays: {bay_ids}")
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def start(self):
-        """Start the monitoring loop in a background daemon thread."""
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True,
                                         name=self.label)
@@ -131,11 +122,19 @@ class BayCameraService:
         logger.info(f"[{self.label}] Started")
 
     def stop(self):
-        """Signal the monitoring loop to stop."""
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=5)
         logger.info(f"[{self.label}] Stopped")
+
+    def get_latest_frame(self) -> Optional[np.ndarray]:
+        """Return the most recent captured frame (thread-safe copy)."""
+        with self._frame_lock:
+            return self._latest_frame.copy() if self._latest_frame is not None else None
+
+    def notify_when_occupied(self, bay_id: str, callback) -> None:
+        """Register a one-shot callback fired the next time bay_id becomes occupied."""
+        self._occupied_callbacks[bay_id] = callback
 
     # ── Internal loop ─────────────────────────────────────────────────────────
 
@@ -152,6 +151,20 @@ class BayCameraService:
         frame_count = 0
         logger.info(f"[{self.label}] Camera {self.camera_index} open – monitoring …")
 
+        # Capture empty-scene reference for background-diff fallback
+        for _ in range(20):
+            cap.read()
+        ret0, ref_frame = cap.read()
+        ref_grays: Dict[str, np.ndarray] = {}
+        if ret0 and ref_frame is not None:
+            for bay_id in self.bay_ids:
+                roi = self.rois.get(bay_id)
+                if roi:
+                    x1, y1, x2, y2 = roi
+                    g = cv2.cvtColor(ref_frame[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
+                    ref_grays[bay_id] = cv2.GaussianBlur(g, (5, 5), 0)
+            logger.info(f"[{self.label}] Reference frames captured")
+
         while not self._stop_event.is_set():
             ret, frame = cap.read()
             if not ret:
@@ -160,24 +173,42 @@ class BayCameraService:
                 continue
 
             frame_count += 1
+            with self._frame_lock:
+                self._latest_frame = frame.copy()
 
-            # ── YOLO inference on full frame ──────────────────────────────
             results = self._yolo(frame, verbose=False, conf=YOLO_CONF)
 
             for bay_id in self.bay_ids:
                 roi = self.rois.get(bay_id)
                 if roi is None:
-                    continue   # not yet calibrated
+                    continue
 
-                occupied, conf = _vehicle_in_roi(results, roi)
+                yolo_hit, conf = _vehicle_in_roi(results, roi)
+
+                # Background-diff fallback: catches toy/model cars YOLO misses
+                bg_hit = False
+                ref_g  = ref_grays.get(bay_id)
+                if ref_g is not None:
+                    x1, y1, x2, y2 = roi
+                    curr_g = cv2.GaussianBlur(
+                        cv2.cvtColor(frame[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY), (5, 5), 0)
+                    diff   = cv2.absdiff(ref_g, curr_g)
+                    _, thr = cv2.threshold(diff, BG_PIXEL_THRESH, 255, cv2.THRESH_BINARY)
+                    roi_area = max(1, (x2 - x1) * (y2 - y1))
+                    bg_hit = np.count_nonzero(thr) / roi_area >= BG_FG_THRESHOLD
+
+                occupied = yolo_hit or bg_hit
+                if occupied and not conf:
+                    conf = 0.5   # synthetic confidence for bg-based detection
+
                 self._update_state(bay_id, occupied, conf, frame, frame_count)
 
         cap.release()
         logger.info(f"[{self.label}] Camera released")
 
     def _update_state(self, bay_id: str, occupied: bool, conf: float,
-                      frame: np.ndarray, frame_count: int):
-        """Apply debounce logic and commit state changes."""
+                      frame, frame_count: int):
+        """Apply debounce and commit occupancy transitions."""
         if occupied:
             self._occ_streak[bay_id]  += 1
             self._free_streak[bay_id]  = 0
@@ -187,47 +218,76 @@ class BayCameraService:
 
         currently_occupied = self._current_state[bay_id]
 
-        # Transition: available → occupied
         if not currently_occupied and self._occ_streak[bay_id] >= DEBOUNCE_COUNT:
             self._current_state[bay_id] = True
-            plate = self._read_plate_in_roi(frame, self.rois[bay_id], frame_count)
+            plate = self._read_plate(frame, self.rois[bay_id], frame_count)
             self._on_occupied(bay_id, plate, conf)
 
-        # Transition: occupied → available
         elif currently_occupied and self._free_streak[bay_id] >= DEBOUNCE_COUNT:
             self._current_state[bay_id] = False
             self._on_vacant(bay_id)
 
     def _on_occupied(self, bay_id: str, plate: Optional[str], conf: float):
-        logger.info(f"[{self.label}] {bay_id} OCCUPIED  plate={plate or '?'}  conf={conf:.2f}")
-
         from src.core.plate_hasher import hash_plate
+        from src.models.database import Bay
+        from src.core import Clock
+
         plate_hash = hash_plate(plate or f"CAM{self.camera_index}_{bay_id}")
+        logger.info(f"[{self.label}] {bay_id} OCCUPIED  plate={plate or '?'}  conf={conf:.2f}")
 
         try:
             self.occupancy.mark_bay_occupied(bay_id=bay_id, plate_hash=plate_hash)
         except Exception as e:
             logger.error(f"[{self.label}] mark_bay_occupied failed: {e}")
 
-        # Publish plate-logging event (dashboard activity feed)
+        # Save raw plate number to the bay row for later search
+        if plate:
+            try:
+                bay = self.db.query(Bay).filter(Bay.id == bay_id).first()
+                if bay:
+                    bay.parked_plate = plate
+                    bay.last_update_time = Clock.now()
+                    self.db.commit()
+                    logger.info(f"[{self.label}] Saved plate {plate} → {bay_id}")
+            except Exception as e:
+                logger.error(f"[{self.label}] Failed to save plate to DB: {e}")
+
+        # Fire one-shot occupied callback if registered
+        cb = self._occupied_callbacks.pop(bay_id, None)
+        if cb:
+            cb(bay_id)
+
+        # Publish event for dashboard activity feed
         self.bus.publish("parking/bays/plate_logged", {
-            "bayId":    bay_id,
-            "plate":    plate or "UNKNOWN",
-            "camera":   self.camera_index,
-            "conf":     round(conf, 3),
+            "bayId":  bay_id,
+            "plate":  plate or "UNKNOWN",
+            "camera": self.camera_index,
+            "conf":   round(conf, 3),
         })
 
     def _on_vacant(self, bay_id: str):
+        from src.models.database import Bay
+        from src.core import Clock
+
         logger.info(f"[{self.label}] {bay_id} VACANT")
         try:
             self.occupancy.mark_bay_vacant(bay_id=bay_id)
         except Exception as e:
             logger.error(f"[{self.label}] mark_bay_vacant failed: {e}")
 
-    def _read_plate_in_roi(self, frame: np.ndarray,
-                           roi: Tuple[int, int, int, int],
-                           frame_count: int) -> Optional[str]:
-        """Run EasyOCR on the ROI crop every OCR_EVERY_N_FRAMES frames."""
+        # Clear the stored plate when the car leaves
+        try:
+            bay = self.db.query(Bay).filter(Bay.id == bay_id).first()
+            if bay:
+                bay.parked_plate = None
+                bay.last_update_time = Clock.now()
+                self.db.commit()
+        except Exception as e:
+            logger.error(f"[{self.label}] Failed to clear plate from DB: {e}")
+
+    def _read_plate(self, frame, roi: Tuple[int, int, int, int],
+                    frame_count: int) -> Optional[str]:
+        """Crop the ROI and run EasyOCR to extract a plate number."""
         if frame_count % OCR_EVERY_N_FRAMES != 0:
             return None
 
@@ -240,10 +300,10 @@ class BayCameraService:
             gray    = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
             results = self._ocr.readtext(gray)
             best_text, best_conf = None, 0.0
-            for (_bbox, text, conf) in results:
+            for (_bbox, text, c) in results:
                 t = _normalize(text)
-                if MIN_PLATE_LEN <= len(t) <= MAX_PLATE_LEN and conf > best_conf:
-                    best_text, best_conf = t, conf
+                if 2 <= len(t) <= 10 and c >= MIN_CONF and c > best_conf:
+                    best_text, best_conf = t, c
             return best_text
         except Exception as e:
             logger.warning(f"[{self.label}] OCR error: {e}")
@@ -256,15 +316,12 @@ def load_bay_cameras(config_path: str, rois_path: str,
                      occupancy_service, bus, db_session) -> List[BayCameraService]:
     """
     Build BayCameraService instances from config + ROI yaml files.
-
-    Returns a list (one per camera).  Cameras whose ROI file entry is missing
-    are still created but will skip unresolved bays silently.
+    Returns one service per camera entry that has bays assigned.
     """
     with open(config_path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
-    # Load ROIs if file exists
-    rois_data: Dict[str, Dict] = {}
+    rois_data: Dict[int, Dict] = {}
     if Path(rois_path).exists():
         with open(rois_path, encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
@@ -276,7 +333,7 @@ def load_bay_cameras(config_path: str, rois_path: str,
                 if b.get("roi")
             }
     else:
-        logger.warning(f"ROI file not found: {rois_path}  – run calibrate_bay_rois.py first")
+        logger.warning(f"ROI file not found: {rois_path} – run calibrate_bay_rois.py first")
 
     services = []
     for cam_cfg in cfg.get("bay_cameras", []):
@@ -285,17 +342,15 @@ def load_bay_cameras(config_path: str, rois_path: str,
         if not bay_ids:
             logger.info(f"Camera {idx}: no bays assigned – skipped")
             continue
-        label   = cam_cfg.get("label", f"BayCam-{idx}")
-        rois    = rois_data.get(idx, {})
 
         svc = BayCameraService(
-            camera_index     = idx,
-            bay_ids          = bay_ids,
-            rois             = rois,
+            camera_index      = idx,
+            bay_ids           = bay_ids,
+            rois              = rois_data.get(idx, {}),
             occupancy_service = occupancy_service,
-            bus              = bus,
-            db_session       = db_session,
-            label            = label,
+            bus               = bus,
+            db_session        = db_session,
+            label             = cam_cfg.get("label", f"BayCam-{idx}"),
         )
         services.append(svc)
 

@@ -1,0 +1,17 @@
+cameras:
+- camera_index: 1
+  bays:
+  - bay_id: G-04
+    roi:
+    - 449
+    - 116
+    - 1025
+    - 738
+- camera_index: 2
+  bays:
+  - bay_id: G-10
+    roi:
+    - 202
+    - 80
+    - 755
+    - 737

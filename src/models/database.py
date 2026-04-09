@@ -82,6 +82,7 @@ class Bay(Base):
     # UNAVAILABLE state tracking
     occupied_plate_hash = Column(String, nullable=True)
     occupied_since = Column(DateTime, nullable=True)
+    parked_plate = Column(String, nullable=True)   # raw plate number for search
     
     # Relationships
     occupancy_events = relationship("OccupancyEvent", back_populates="bay", cascade="all, delete-orphan")

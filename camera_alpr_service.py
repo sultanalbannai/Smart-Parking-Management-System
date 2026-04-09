@@ -135,7 +135,8 @@ class CameraALPRService:
 
     # ── Main detection loop ───────────────────────────────────────────────────
 
-    def wait_for_vehicle(self, timeout: int = 300) -> Tuple[Optional[str], Optional[np.ndarray]]:
+    def wait_for_vehicle(self, timeout: int = 300,
+                         get_bay_frame=None) -> Tuple[Optional[str], Optional[np.ndarray]]:
         """
         Show live camera feed.
         Captures a reference of the empty scene, then compares every frame
@@ -143,6 +144,10 @@ class CameraALPRService:
         how long it stays still.
         Snaps ONE frame once the car has stopped moving, runs OCR once.
         Returns (plate_text, frame) or (None, None) if 'q' pressed / timeout.
+
+        get_bay_frame: optional callable() -> np.ndarray
+            If provided, its result is shown in a separate window every frame
+            so bay cameras and gate camera are both pumped from the main thread.
         """
         if not self.is_camera_ready:
             logger.error("Camera not ready")
@@ -177,10 +182,12 @@ class CameraALPRService:
         snap_frame   = None
         snapped      = False
 
+        BAY_WIN = "Bay Cameras – Live Monitor  |  q = quit"
+
         while True:
             if (datetime.now() - start_time).seconds > timeout:
                 logger.warning("Vehicle detection timeout")
-                cv2.destroyAllWindows()
+                cv2.destroyWindow('Gate Camera – ALPR')
                 return None, None
 
             frame = self.capture_frame()
@@ -258,13 +265,18 @@ class CameraALPRService:
                 if plate:
                     last_trigger = time.time()
                     logger.info(f"Plate detected: {plate}  conf={conf:.2f}")
-                    cv2.destroyAllWindows()
+                    cv2.destroyWindow('Gate Camera – ALPR')
                     return plate, snap_frame
                 else:
                     logger.info("Snap: no plate found – resuming scan")
                     cv2.putText(display, "No plate found – reposition",
                                 (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 60, 255), 2)
                     cv2.imshow('Gate Camera – ALPR', display)
+                    if get_bay_frame:
+                        try:
+                            cv2.imshow(BAY_WIN, get_bay_frame())
+                        except Exception:
+                            pass
                     cv2.waitKey(800)
                     snapped      = False
                     snap_frame   = None
@@ -272,10 +284,15 @@ class CameraALPRService:
                     continue
 
             cv2.imshow('Gate Camera – ALPR', display)
+            if get_bay_frame:
+                try:
+                    cv2.imshow(BAY_WIN, get_bay_frame())
+                except Exception:
+                    pass
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 logger.info("User quit camera")
-                cv2.destroyAllWindows()
+                cv2.destroyWindow('Gate Camera – ALPR')
                 return None, None
 
     # ── Legacy helper ─────────────────────────────────────────────────────────

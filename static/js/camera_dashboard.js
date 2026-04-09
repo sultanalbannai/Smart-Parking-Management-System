@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateClock();
     setInterval(updateClock, 1000);
     initZoomControls();
+    initBayModal();
 });
 
 // ── Socket.IO ─────────────────────────────────────────────────────────────────
@@ -34,6 +35,10 @@ function initSocket() {
     socket.on('bay_update', (data) => {
         if (baysData[data.id]) {
             baysData[data.id].state = data.state;
+            // Clear cached plate when bay becomes available again
+            if (data.state === 'AVAILABLE') {
+                baysData[data.id].plate = null;
+            }
             updateBayVisual(data.id, data.state);
             updateStatistics();
             updateCategoryList();
@@ -64,6 +69,16 @@ function initSocket() {
     socket.on('plate_logged', (data) => {
         const conf = data.conf ? ` (${Math.round(data.conf * 100)}%)` : '';
         addActivity('confirmation', `Bay cam: ${data.plate || 'UNKNOWN'} at ${data.bayId}${conf}`);
+        // Cache the plate so the click-popup shows it immediately
+        if (baysData[data.bayId]) {
+            baysData[data.bayId].plate = data.plate || null;
+        }
+        // If modal is currently open on this bay, refresh it live
+        const modal = document.getElementById('bayModalBackdrop');
+        if (modal && modal.classList.contains('open') &&
+            document.getElementById('bmBayId').textContent === data.bayId) {
+            openBayModal(data.bayId);
+        }
     });
 
     // Periodic sync to stay in step with DB
@@ -122,6 +137,10 @@ function renderMap() {
 
         g.appendChild(rect);
         g.appendChild(label);
+
+        // Click to open bay detail popup
+        g.style.cursor = 'pointer';
+        g.addEventListener('click', () => openBayModal(bay.id));
 
         // Category badge for non-general bays
         if (bay.category && bay.category !== 'GENERAL') {
@@ -348,5 +367,80 @@ function applyZoom() {
         svg.style.transform = `scale(${currentZoom})`;
         svg.style.transformOrigin = 'top center';
         svg.style.transition = 'transform 0.2s ease';
+    }
+}
+
+// ── Bay detail modal ─────────────────────────────────────────────────────────
+
+function initBayModal() {
+    const backdrop = document.getElementById('bayModalBackdrop');
+    const closeBtn = document.getElementById('bmClose');
+    if (closeBtn) closeBtn.addEventListener('click', closeBayModal);
+    if (backdrop) {
+        backdrop.addEventListener('click', (e) => {
+            if (e.target === backdrop) closeBayModal();
+        });
+    }
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeBayModal();
+    });
+}
+
+function closeBayModal() {
+    document.getElementById('bayModalBackdrop')?.classList.remove('open');
+}
+
+function openBayModal(bayId) {
+    const backdrop = document.getElementById('bayModalBackdrop');
+    if (!backdrop) return;
+
+    // Populate from cache first so popup feels instant
+    const cached = baysData[bayId];
+    fillBayModal({
+        id:       bayId,
+        state:    cached?.state    || 'UNKNOWN',
+        category: cached?.category || 'GENERAL',
+        distance: cached?.distance,
+        plate:    cached?.plate,
+    });
+    backdrop.classList.add('open');
+
+    // Then fetch fresh details (includes last_update / occupied_since)
+    fetch(`/api/bay/${encodeURIComponent(bayId)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+            if (!data || data.error) return;
+            // Update local cache so subsequent reads are fresh
+            if (baysData[bayId]) {
+                baysData[bayId].state = data.state;
+                baysData[bayId].plate = data.plate;
+            }
+            fillBayModal(data);
+        })
+        .catch(() => {});
+}
+
+function fillBayModal(data) {
+    const $ = (id) => document.getElementById(id);
+
+    $('bmBayId').textContent    = data.id || '--';
+    $('bmCategory').textContent = data.category || 'GENERAL';
+
+    const stateEl = $('bmState');
+    stateEl.textContent = data.state || 'UNKNOWN';
+    stateEl.className   = 'bm-state ' + (data.state || 'UNKNOWN');
+
+    $('bmDistance').textContent = (data.distance != null) ? `${data.distance} m` : '—';
+
+    const upd = data.last_update ? new Date(data.last_update) : null;
+    $('bmUpdate').textContent = upd ? upd.toLocaleString() : '—';
+
+    const plateEl = $('bmPlate');
+    if (data.plate) {
+        plateEl.textContent = data.plate;
+        plateEl.classList.remove('empty');
+    } else {
+        plateEl.textContent = data.state === 'AVAILABLE' ? 'Bay is empty' : 'No plate recorded';
+        plateEl.classList.add('empty');
     }
 }
