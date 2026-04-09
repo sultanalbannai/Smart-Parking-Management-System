@@ -187,7 +187,7 @@ class CameraALPRService:
         while True:
             if (datetime.now() - start_time).seconds > timeout:
                 logger.warning("Vehicle detection timeout")
-                cv2.destroyWindow('Gate Camera – ALPR')
+                cv2.destroyAllWindows()
                 return None, None
 
             frame = self.capture_frame()
@@ -265,7 +265,7 @@ class CameraALPRService:
                 if plate:
                     last_trigger = time.time()
                     logger.info(f"Plate detected: {plate}  conf={conf:.2f}")
-                    cv2.destroyWindow('Gate Camera – ALPR')
+                    cv2.destroyAllWindows()
                     return plate, snap_frame
                 else:
                     logger.info("Snap: no plate found – resuming scan")
@@ -292,7 +292,7 @@ class CameraALPRService:
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 logger.info("User quit camera")
-                cv2.destroyWindow('Gate Camera – ALPR')
+                cv2.destroyAllWindows()
                 return None, None
 
     # ── Legacy helper ─────────────────────────────────────────────────────────
