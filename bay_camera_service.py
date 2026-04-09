@@ -31,8 +31,9 @@ logger = logging.getLogger(__name__)
 YOLO_CONF          = 0.45        # minimum YOLO detection confidence
 VEHICLE_CLASSES    = {2, 5, 7}  # COCO: car=2, bus=5, truck=7
 DEBOUNCE_COUNT     = 4           # consecutive same-state frames to commit
-OCR_EVERY_N_FRAMES = 30          # run plate OCR every N frames (~1 s @ 30 fps)
-MIN_CONF           = 0.35        # minimum EasyOCR confidence
+MIN_CONF           = 0.30        # minimum EasyOCR confidence
+OCR_RETRY_FRAMES   = 150         # keep retrying OCR for this many frames (~5 s)
+OCR_RETRY_INTERVAL = 15          # attempt OCR every N frames during retry window
 
 # Background-subtraction fallback (catches toy/model cars YOLO misses)
 BG_FG_THRESHOLD    = 0.10        # fraction of ROI pixels that must change
@@ -102,6 +103,9 @@ class BayCameraService:
 
         # One-shot callbacks: bay_id → callable, fired once on occupied
         self._occupied_callbacks: Dict[str, callable] = {}
+
+        # Per-bay OCR retry budget (frames remaining to keep trying after occupancy)
+        self._ocr_retry: Dict[str, int] = {b: 0 for b in bay_ids}
 
         logger.info(f"[{self.label}] Loading YOLOv8n …")
         from ultralytics import YOLO
@@ -203,6 +207,24 @@ class BayCameraService:
 
                 self._update_state(bay_id, occupied, conf, frame, frame_count)
 
+            # ── Plate retry loop ───────────────────────────────────────────
+            # If occupancy was confirmed but plate not yet read, keep trying
+            # every OCR_RETRY_INTERVAL frames for up to OCR_RETRY_FRAMES frames.
+            for bay_id in self.bay_ids:
+                if self._ocr_retry.get(bay_id, 0) <= 0:
+                    continue
+                self._ocr_retry[bay_id] -= 1
+                if frame_count % OCR_RETRY_INTERVAL != 0:
+                    continue
+                roi = self.rois.get(bay_id)
+                if roi is None:
+                    continue
+                plate = self._read_plate_crop(frame, roi)
+                if plate:
+                    self._ocr_retry[bay_id] = 0
+                    logger.info(f"[{self.label}] {bay_id} plate (retry): {plate}")
+                    self._save_plate(bay_id, plate)
+
         cap.release()
         logger.info(f"[{self.label}] Camera released")
 
@@ -220,11 +242,16 @@ class BayCameraService:
 
         if not currently_occupied and self._occ_streak[bay_id] >= DEBOUNCE_COUNT:
             self._current_state[bay_id] = True
-            plate = self._read_plate(frame, self.rois[bay_id], frame_count)
+            # Always attempt OCR immediately at the transition (no frame-count gate)
+            plate = self._read_plate_crop(frame, self.rois[bay_id])
+            if not plate:
+                # Arm retry: keep trying for ~5 s after occupancy confirmed
+                self._ocr_retry[bay_id] = OCR_RETRY_FRAMES
             self._on_occupied(bay_id, plate, conf)
 
         elif currently_occupied and self._free_streak[bay_id] >= DEBOUNCE_COUNT:
             self._current_state[bay_id] = False
+            self._ocr_retry[bay_id] = 0   # cancel any pending retry
             self._on_vacant(bay_id)
 
     def _on_occupied(self, bay_id: str, plate: Optional[str], conf: float):
@@ -240,30 +267,23 @@ class BayCameraService:
         except Exception as e:
             logger.error(f"[{self.label}] mark_bay_occupied failed: {e}")
 
-        # Save raw plate number to the bay row for later search
+        # Save raw plate number (if already detected at transition)
         if plate:
-            try:
-                bay = self.db.query(Bay).filter(Bay.id == bay_id).first()
-                if bay:
-                    bay.parked_plate = plate
-                    bay.last_update_time = Clock.now()
-                    self.db.commit()
-                    logger.info(f"[{self.label}] Saved plate {plate} → {bay_id}")
-            except Exception as e:
-                logger.error(f"[{self.label}] Failed to save plate to DB: {e}")
+            self._save_plate(bay_id, plate)
 
         # Fire one-shot occupied callback if registered
         cb = self._occupied_callbacks.pop(bay_id, None)
         if cb:
             cb(bay_id)
 
-        # Publish event for dashboard activity feed
-        self.bus.publish("parking/bays/plate_logged", {
-            "bayId":  bay_id,
-            "plate":  plate or "UNKNOWN",
-            "camera": self.camera_index,
-            "conf":   round(conf, 3),
-        })
+        # If no plate yet, still notify dashboard so activity feed shows occupancy
+        if not plate:
+            self.bus.publish("parking/bays/plate_logged", {
+                "bayId":  bay_id,
+                "plate":  "SCANNING…",
+                "camera": self.camera_index,
+                "conf":   round(conf, 3),
+            })
 
     def _on_vacant(self, bay_id: str):
         from src.models.database import Bay
@@ -285,29 +305,63 @@ class BayCameraService:
         except Exception as e:
             logger.error(f"[{self.label}] Failed to clear plate from DB: {e}")
 
-    def _read_plate(self, frame, roi: Tuple[int, int, int, int],
-                    frame_count: int) -> Optional[str]:
-        """Crop the ROI and run EasyOCR to extract a plate number."""
-        if frame_count % OCR_EVERY_N_FRAMES != 0:
-            return None
-
+    def _read_plate_crop(self, frame, roi: Tuple[int, int, int, int]) -> Optional[str]:
+        """
+        Crop the ROI, enhance contrast, and run EasyOCR.
+        Always runs (no frame-count gate) – callers decide when to invoke.
+        """
         x1, y1, x2, y2 = roi
         crop = frame[y1:y2, x1:x2]
         if crop.size == 0:
             return None
 
         try:
-            gray    = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-            results = self._ocr.readtext(gray)
+            gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+
+            # CLAHE contrast enhancement – helps on dim / uneven lighting
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            gray  = clahe.apply(gray)
+
+            # Mild sharpening
+            kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
+            gray   = cv2.filter2D(gray, -1, kernel)
+
+            # Run OCR on original size AND 2× upscale for better small-text accuracy
             best_text, best_conf = None, 0.0
-            for (_bbox, text, c) in results:
-                t = _normalize(text)
-                if 2 <= len(t) <= 10 and c >= MIN_CONF and c > best_conf:
-                    best_text, best_conf = t, c
+            for img in [gray, cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)]:
+                for (_bbox, text, c) in self._ocr.readtext(img):
+                    t = _normalize(text)
+                    if 2 <= len(t) <= 10 and c >= MIN_CONF and c > best_conf:
+                        best_text, best_conf = t, c
+
+            if best_text:
+                logger.debug(f"[{self.label}] OCR result: {best_text}  conf={best_conf:.2f}")
             return best_text
+
         except Exception as e:
             logger.warning(f"[{self.label}] OCR error: {e}")
             return None
+
+    def _save_plate(self, bay_id: str, plate: str):
+        """Persist a newly-read plate to the bay row and broadcast the event."""
+        from src.models.database import Bay
+        from src.core import Clock
+        try:
+            bay = self.db.query(Bay).filter(Bay.id == bay_id).first()
+            if bay:
+                bay.parked_plate     = plate
+                bay.last_update_time = Clock.now()
+                self.db.commit()
+                logger.info(f"[{self.label}] Saved plate {plate} → {bay_id}")
+        except Exception as e:
+            logger.error(f"[{self.label}] Failed to save plate to DB: {e}")
+
+        self.bus.publish("parking/bays/plate_logged", {
+            "bayId":  bay_id,
+            "plate":  plate,
+            "camera": self.camera_index,
+            "conf":   0.0,
+        })
 
 
 # ── Loader helper (used by run_camera_demo.py) ────────────────────────────────
