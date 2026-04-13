@@ -147,6 +147,11 @@ def kiosk():
     return render_template('camera_kiosk.html')
 
 
+@app.route('/search')
+def search():
+    return render_template('camera_search.html')
+
+
 @app.route('/api/bays')
 def get_bays():
     if not db_session:

@@ -4,152 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
-    <title>Parking Dashboard - Camera ALPR</title>
+    <title>SPMS Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/production.css') }}">
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <style>
-        /* Override zones panel → show a compact ALPR status card instead */
-        .alpr-card {
-            background: #0f172a;
-            border: 2px solid #1e3a5f;
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 16px;
-            text-align: center;
-        }
-        .alpr-card h3 { margin: 0 0 12px; color: #94a3b8; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; }
-        .alpr-status-dot {
-            display: inline-block;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: #64748b;
-            margin-right: 8px;
-            vertical-align: middle;
-        }
-        .alpr-status-dot.scanning { background: #f59e0b; animation: blink 1s infinite; }
-        .alpr-status-dot.detected { background: #10b981; }
-        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-
-        .plate-chip {
-            display: inline-block;
-            background: #1e3a5f;
-            border: 1px solid #3b82f6;
-            border-radius: 6px;
-            padding: 6px 16px;
-            font-family: 'Courier New', monospace;
-            font-size: 1.2rem;
-            font-weight: 700;
-            color: #fff;
-            letter-spacing: 4px;
-            margin-top: 8px;
-        }
-
-        /* Compact category breakdown */
-        .cat-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #1e293b; }
-        .cat-row:last-child { border-bottom: none; }
-        .cat-badge { font-size: 0.78rem; padding: 2px 8px; border-radius: 10px; }
-        .cat-badge.POD     { background: #7c3aed22; color: #a78bfa; border: 1px solid #7c3aed44; }
-        .cat-badge.STAFF   { background: #0369a122; color: #38bdf8; border: 1px solid #0369a144; }
-        .cat-badge.GENERAL { background: #05966922; color: #34d399; border: 1px solid #05966944; }
-
-        /* ── Bay detail modal ────────────────────────────────────────────── */
-        .parking-bay { cursor: pointer; }
-        .parking-bay:hover rect { stroke-width: 3 !important; filter: brightness(1.3); }
-
-        .bay-modal-backdrop {
-            display: none;
-            position: fixed; inset: 0;
-            background: rgba(0,0,0,0.65);
-            z-index: 1000;
-            align-items: center; justify-content: center;
-        }
-        .bay-modal-backdrop.open { display: flex; }
-        .bay-modal {
-            background: #0f172a;
-            border: 2px solid #3b82f6;
-            border-radius: 14px;
-            padding: 28px 32px;
-            min-width: 340px;
-            max-width: 420px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.7);
-            color: #e2e8f0;
-            position: relative;
-        }
-        .bay-modal h2 {
-            margin: 0 0 4px;
-            font-size: 2rem;
-            color: #60a5fa;
-            letter-spacing: 2px;
-        }
-        .bay-modal .bm-cat {
-            display: inline-block;
-            font-size: 0.75rem;
-            padding: 3px 10px;
-            border-radius: 10px;
-            background: #1e3a5f;
-            color: #93c5fd;
-            margin-bottom: 16px;
-            letter-spacing: 1px;
-        }
-        .bay-modal .bm-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 10px 0;
-            border-bottom: 1px solid #1e293b;
-            font-size: 0.92rem;
-        }
-        .bay-modal .bm-row:last-child { border-bottom: none; }
-        .bay-modal .bm-label { color: #94a3b8; }
-        .bay-modal .bm-value { color: #f1f5f9; font-weight: 600; }
-        .bay-modal .bm-plate {
-            display: block;
-            margin-top: 14px;
-            padding: 14px;
-            background: #1e3a5f;
-            border: 2px solid #3b82f6;
-            border-radius: 8px;
-            font-family: 'Courier New', monospace;
-            font-size: 1.6rem;
-            font-weight: 700;
-            letter-spacing: 5px;
-            text-align: center;
-            color: #fff;
-        }
-        .bay-modal .bm-plate.empty {
-            background: #1e293b;
-            border-color: #334155;
-            color: #64748b;
-            font-size: 0.95rem;
-            letter-spacing: 1px;
-            font-family: inherit;
-        }
-        .bay-modal .bm-state {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 0.8rem;
-            font-weight: 700;
-            letter-spacing: 1px;
-        }
-        .bay-modal .bm-state.AVAILABLE   { background: #05966933; color: #34d399; border: 1px solid #10b981; }
-        .bay-modal .bm-state.UNAVAILABLE { background: #dc262633; color: #f87171; border: 1px solid #ef4444; }
-        .bay-modal .bm-state.PENDING     { background: #d9770633; color: #fbbf24; border: 1px solid #f59e0b; }
-        .bay-modal .bm-state.UNKNOWN     { background: #47556933; color: #94a3b8; border: 1px solid #64748b; }
-        .bay-modal .bm-close {
-            position: absolute;
-            top: 12px; right: 16px;
-            background: none;
-            border: none;
-            color: #94a3b8;
-            font-size: 1.6rem;
-            cursor: pointer;
-            line-height: 1;
-        }
-        .bay-modal .bm-close:hover { color: #f1f5f9; }
-    </style>
 </head>
 <body>
     <div class="dashboard">
@@ -157,26 +14,31 @@
         <!-- Header -->
         <header class="header">
             <div class="logo">
-                <span class="logo-icon">📷</span>
-                <h1>Smart Parking – Camera ALPR</h1>
+                <span class="logo-icon">&#9679;</span>
+                <h1>SPMS</h1>
             </div>
+            <nav class="header-nav">
+                <a href="/" class="active">Dashboard</a>
+                <a href="/kiosk">Kiosk</a>
+                <a href="/search">Find My Car</a>
+            </nav>
             <div class="header-right">
                 <div class="time" id="currentTime">--:--:--</div>
                 <div class="status online" id="status">
                     <span class="dot"></span>
-                    <span>ONLINE</span>
+                    <span>LIVE</span>
                 </div>
             </div>
         </header>
 
         <div class="main-content">
 
-            <!-- Left Panel: Stats + ALPR status -->
+            <!-- ── Left Panel ────────────────────────────────────────────── -->
             <aside class="left-panel">
 
-                <!-- Overall stats -->
+                <!-- Stats -->
                 <div class="card">
-                    <h3>Overall Status</h3>
+                    <h3>Occupancy</h3>
                     <div class="stats-grid">
                         <div class="stat-box">
                             <div class="stat-value" id="totalBays">-</div>
@@ -184,11 +46,11 @@
                         </div>
                         <div class="stat-box available">
                             <div class="stat-value" id="availableBays">-</div>
-                            <div class="stat-label">Available</div>
+                            <div class="stat-label">Free</div>
                         </div>
                         <div class="stat-box occupied">
                             <div class="stat-value" id="occupiedBays">-</div>
-                            <div class="stat-label">Occupied</div>
+                            <div class="stat-label">Used</div>
                         </div>
                     </div>
                     <div class="occupancy-section">
@@ -196,19 +58,19 @@
                             <div class="occupancy-fill" id="occupancyFill"></div>
                         </div>
                         <div class="occupancy-label">
-                            <span id="occupancyText">0%</span> Occupancy
+                            <span id="occupancyText">0%</span> occupancy
                         </div>
                     </div>
                 </div>
 
-                <!-- Camera ALPR Status -->
+                <!-- Camera ALPR -->
                 <div class="alpr-card">
-                    <h3>Camera ALPR</h3>
+                    <h3>Gate Camera</h3>
                     <div id="alprStatusLine">
                         <span class="alpr-status-dot" id="alprDot"></span>
-                        <span id="alprStatusText" style="color:#94a3b8; font-size:0.9rem;">Waiting...</span>
+                        <span id="alprStatusText" style="color:var(--text-3); font-size:0.82rem;">Idle</span>
                     </div>
-                    <div id="alprPlateDisplay" style="display:none; margin-top:8px;">
+                    <div id="alprPlateDisplay" style="display:none; margin-top:6px;">
                         <div class="plate-chip" id="alprPlateChip"></div>
                     </div>
                 </div>
@@ -232,11 +94,11 @@
                             <span>Occupied</span>
                         </div>
                         <div class="legend-item">
-                            <span class="legend-badge pod">♿</span>
+                            <span class="legend-badge pod">P</span>
                             <span>POD Reserved</span>
                         </div>
                         <div class="legend-item">
-                            <span class="legend-badge staff">👔</span>
+                            <span class="legend-badge staff">S</span>
                             <span>Staff Reserved</span>
                         </div>
                     </div>
@@ -244,54 +106,45 @@
 
             </aside>
 
-            <!-- Center: Visual Parking Map -->
+            <!-- ── Center: Parking Map ───────────────────────────────────── -->
             <main class="map-container">
                 <div class="map-header">
-                    <h2>Parking Layout – Single Entrance</h2>
+                    <h2>Parking Map</h2>
                     <div class="map-controls">
                         <button class="btn-zoom" id="btnZoomIn">+</button>
-                        <button class="btn-zoom" id="btnZoomOut">−</button>
-                        <button class="btn-zoom" id="btnReset">⟲</button>
+                        <button class="btn-zoom" id="btnZoomOut">&minus;</button>
+                        <button class="btn-zoom" id="btnReset">&#x27F2;</button>
                     </div>
                 </div>
                 <div class="map-wrapper" id="mapWrapper">
-                    <!--
-                        viewBox covers the full bay grid + entrance area.
-                        Bays: x 85–1085, y 170–610  (+ 50px bay height = 660)
-                        Entrance: y ~760
-                        Add padding → viewBox = "0 0 1200 850"
-                    -->
                     <svg id="parkingMap" viewBox="0 0 1200 850" preserveAspectRatio="xMidYMid meet">
-
-                        <!-- Row labels (far → close) -->
-                        <text x="32" y="200" text-anchor="middle" fill="#475569" font-size="11">R4</text>
-                        <text x="32" y="460" text-anchor="middle" fill="#475569" font-size="11">R3</text>
-                        <text x="32" y="590" text-anchor="middle" fill="#475569" font-size="11">R2</text>
-                        <text x="32" y="720" text-anchor="middle" fill="#475569" font-size="11">R1</text>
-
-                        <!-- Drive-lane lines -->
+                        <!-- Row labels -->
+                        <text x="32" y="200" text-anchor="middle" fill="#334155" font-size="11" font-family="Inter, sans-serif">R4</text>
+                        <text x="32" y="460" text-anchor="middle" fill="#334155" font-size="11" font-family="Inter, sans-serif">R3</text>
+                        <text x="32" y="590" text-anchor="middle" fill="#334155" font-size="11" font-family="Inter, sans-serif">R2</text>
+                        <text x="32" y="720" text-anchor="middle" fill="#334155" font-size="11" font-family="Inter, sans-serif">R1</text>
+                        <!-- Drive lanes -->
                         <line x1="60" y1="250" x2="1140" y2="250" stroke="#1e293b" stroke-width="1" stroke-dasharray="6,4"/>
                         <line x1="60" y1="380" x2="1140" y2="380" stroke="#1e293b" stroke-width="1" stroke-dasharray="6,4"/>
                         <line x1="60" y1="510" x2="1140" y2="510" stroke="#1e293b" stroke-width="1" stroke-dasharray="6,4"/>
-
-                        <!-- Bays rendered by JS -->
+                        <!-- Dynamic content -->
                         <g id="parkingBays"></g>
-
-                        <!-- Entrance marker rendered by JS -->
                         <g id="entranceMarker"></g>
-
                     </svg>
                 </div>
             </main>
 
-            <!-- Right Panel: Live Activity -->
+            <!-- ── Right Panel: Activity Feed ────────────────────────────── -->
             <aside class="right-panel">
                 <div class="card">
                     <h3>Live Activity</h3>
                     <div class="activity-feed" id="activityFeed">
-                        <div class="activity-item">
-                            <span class="time">--:--:--</span>
-                            <span>System initialized</span>
+                        <div class="activity-item system">
+                            <span class="act-icon">&#9881;</span>
+                            <div class="act-body">
+                                <div class="act-text">System initialized</div>
+                                <div class="act-time">just now</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -319,7 +172,7 @@
                 <span class="bm-value" id="bmUpdate">-</span>
             </div>
             <div class="bm-row" style="flex-direction:column; align-items:stretch;">
-                <span class="bm-label" style="margin-bottom:4px;">License plate</span>
+                <span class="bm-label" style="margin-bottom:4px;">License Plate</span>
                 <span class="bm-plate empty" id="bmPlate">Not parked</span>
             </div>
         </div>

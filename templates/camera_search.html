@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Find My Car - SPMS</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/search.css') }}">
+</head>
+<body>
+    <div class="search-container">
+
+        <!-- Header -->
+        <header class="search-header">
+            <div class="logo">
+                <span class="logo-icon">&#128663;</span>
+                <h1>Find My Car</h1>
+            </div>
+            <a href="/" class="btn-back">&larr; Dashboard</a>
+        </header>
+
+        <!-- Search Section -->
+        <div class="search-content">
+            <div class="search-box-container" id="searchBox">
+                <h2>Enter Your License Plate</h2>
+                <p class="search-subtitle">We'll show you exactly where you parked</p>
+
+                <div class="search-input-wrapper">
+                    <input
+                        type="text"
+                        id="plateInput"
+                        class="plate-input"
+                        placeholder="e.g. 9919"
+                        autocomplete="off"
+                        maxlength="20"
+                    >
+                    <button id="btnSearch" class="btn-search">
+                        <span class="search-icon">&#128269;</span>
+                        Search
+                    </button>
+                </div>
+
+                <div id="searchError" class="error-message" style="display: none;">
+                    <span class="error-icon">&#9888;&#65039;</span>
+                    <span id="errorText"></span>
+                </div>
+            </div>
+
+            <!-- Results Section -->
+            <div id="resultsSection" class="results-section" style="display: none;">
+                <div class="results-header">
+                    <h3>Your Parking Location</h3>
+                    <button id="btnNewSearch" class="btn-new-search">New Search</button>
+                </div>
+
+                <div class="results-grid">
+                    <!-- Bay Info Card -->
+                    <div class="bay-info-card">
+                        <div class="bay-info-header">
+                            <div class="bay-badge" id="bayBadge">-</div>
+                            <div class="bay-status" id="bayStatus">
+                                <span class="status-dot occupied"></span>
+                                <span>Parked</span>
+                            </div>
+                        </div>
+
+                        <div class="bay-details">
+                            <div class="detail-item">
+                                <span class="detail-icon">&#128205;</span>
+                                <div class="detail-content">
+                                    <div class="detail-label">Category</div>
+                                    <div class="detail-value" id="bayCategory">-</div>
+                                </div>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-icon">&#128207;</span>
+                                <div class="detail-content">
+                                    <div class="detail-label">Distance from Gate</div>
+                                    <div class="detail-value" id="bayDistance">-</div>
+                                </div>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-icon">&#128663;</span>
+                                <div class="detail-content">
+                                    <div class="detail-label">License Plate</div>
+                                    <div class="detail-value" id="bayPlate">-</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bay-directions">
+                            <h4>How to Find Your Car</h4>
+                            <ol id="directionsList">
+                                <li>Enter through the main gate</li>
+                                <li>Follow the lane to bay <strong id="dirBay">-</strong></li>
+                                <li>Your car is approximately <strong id="dirDistance">-</strong> from the entrance</li>
+                            </ol>
+                        </div>
+                    </div>
+
+                    <!-- Map Card -->
+                    <div class="map-card">
+                        <h4>Parking Map</h4>
+                        <div class="map-wrapper">
+                            <svg id="searchMap" viewBox="0 0 1200 850" preserveAspectRatio="xMidYMid meet">
+                                <!-- Drive lanes -->
+                                <line x1="60" y1="250" x2="1140" y2="250" stroke="#1e293b" stroke-width="1" stroke-dasharray="6,4"/>
+                                <line x1="60" y1="380" x2="1140" y2="380" stroke="#1e293b" stroke-width="1" stroke-dasharray="6,4"/>
+                                <line x1="60" y1="510" x2="1140" y2="510" stroke="#1e293b" stroke-width="1" stroke-dasharray="6,4"/>
+                                <g id="baysGroup"></g>
+                                <g id="highlightGroup"></g>
+                                <!-- Entrance -->
+                                <circle cx="600" cy="760" r="24" fill="#3b82f6" opacity="0.8" stroke="rgba(255,255,255,0.3)" stroke-width="2"/>
+                                <text x="600" y="767" text-anchor="middle" font-size="16">&#128663;</text>
+                                <text x="600" y="800" text-anchor="middle" fill="#60a5fa" font-size="11" font-weight="bold" font-family="Inter, sans-serif">ENTRANCE</text>
+                            </svg>
+                        </div>
+                        <div class="map-legend">
+                            <div class="legend-item">
+                                <span class="legend-dot your-car"></span>
+                                <span>Your Car</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-dot other-cars"></span>
+                                <span>Other Bays</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="search-footer">
+            <p>Smart Parking Management System</p>
+        </footer>
+    </div>
+
+    <script>
+        const plateInput    = document.getElementById('plateInput');
+        const btnSearch     = document.getElementById('btnSearch');
+        const searchError   = document.getElementById('searchError');
+        const errorText     = document.getElementById('errorText');
+        const resultsSection = document.getElementById('resultsSection');
+        const searchBox     = document.getElementById('searchBox');
+        const btnNewSearch  = document.getElementById('btnNewSearch');
+
+        let allBays = {};
+
+        async function loadBays() {
+            try {
+                const res  = await fetch('/api/bays');
+                const data = await res.json();
+                allBays = data.bays || {};
+                renderAllBays();
+            } catch (e) {
+                console.error('Failed to load bays', e);
+            }
+        }
+
+        function renderAllBays() {
+            const group = document.getElementById('baysGroup');
+            group.innerHTML = '';
+
+            Object.values(allBays).forEach(bay => {
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', bay.x);
+                rect.setAttribute('y', bay.y);
+                rect.setAttribute('width', 80);
+                rect.setAttribute('height', 48);
+                rect.setAttribute('rx', 6);
+
+                const isOccupied = bay.state !== 'AVAILABLE';
+                rect.setAttribute('fill', isOccupied ? 'rgba(244,63,94,0.12)' : 'rgba(16,185,129,0.1)');
+                rect.setAttribute('stroke', isOccupied ? '#f43f5e' : '#10b981');
+                rect.setAttribute('stroke-width', '1');
+                rect.setAttribute('opacity', '0.5');
+
+                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                label.setAttribute('x', bay.x + 40);
+                label.setAttribute('y', bay.y + 28);
+                label.setAttribute('text-anchor', 'middle');
+                label.setAttribute('font-size', '9');
+                label.setAttribute('fill', '#64748b');
+                label.setAttribute('font-family', 'Inter, sans-serif');
+                label.textContent = bay.id;
+
+                group.appendChild(rect);
+                group.appendChild(label);
+            });
+        }
+
+        async function searchPlate() {
+            const plate = plateInput.value.trim().toUpperCase();
+            if (!plate) { showError('Please enter a plate number'); return; }
+
+            hideError();
+            btnSearch.disabled = true;
+            btnSearch.textContent = 'Searching...';
+
+            try {
+                const res  = await fetch(`/api/find_plate/${encodeURIComponent(plate)}`);
+                const data = await res.json();
+
+                if (data.found) {
+                    displayResults(data);
+                } else {
+                    showError('Vehicle not found. Check the plate number or the car may have left.');
+                }
+            } catch (e) {
+                showError('Search failed. Please try again.');
+            } finally {
+                btnSearch.disabled = false;
+                btnSearch.innerHTML = '<span class="search-icon">&#128269;</span> Search';
+            }
+        }
+
+        function displayResults(data) {
+            searchBox.style.display = 'none';
+            resultsSection.style.display = 'block';
+
+            document.getElementById('bayBadge').textContent    = data.bayId;
+            document.getElementById('bayCategory').textContent = data.category || 'GENERAL';
+            document.getElementById('bayDistance').textContent  = data.distance ? `${data.distance} m` : '-';
+            document.getElementById('bayPlate').textContent     = data.plate || '-';
+            document.getElementById('dirBay').textContent       = data.bayId;
+            document.getElementById('dirDistance').textContent   = data.distance ? `${data.distance} m` : 'a short walk';
+
+            highlightBay(data.bayId);
+        }
+
+        function highlightBay(bayId) {
+            const hl = document.getElementById('highlightGroup');
+            hl.innerHTML = '';
+
+            const bay = allBays[bayId];
+            if (!bay) return;
+
+            const x = bay.x, y = bay.y;
+
+            // Glow rect
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('x', x);
+            rect.setAttribute('y', y);
+            rect.setAttribute('width', 80);
+            rect.setAttribute('height', 48);
+            rect.setAttribute('rx', 6);
+            rect.setAttribute('fill', '#f59e0b');
+            rect.setAttribute('fill-opacity', '0.5');
+            rect.setAttribute('stroke', '#f59e0b');
+            rect.setAttribute('stroke-width', '3');
+            rect.classList.add('pulse-highlight');
+
+            // Label
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', x + 40);
+            text.setAttribute('y', y + 30);
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('fill', 'white');
+            text.setAttribute('font-size', '13');
+            text.setAttribute('font-weight', 'bold');
+            text.setAttribute('font-family', 'Inter, sans-serif');
+            text.textContent = bayId;
+
+            // "YOUR CAR" pointer
+            const pointer = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            pointer.setAttribute('x', x + 40);
+            pointer.setAttribute('y', y - 12);
+            pointer.setAttribute('text-anchor', 'middle');
+            pointer.setAttribute('fill', '#f59e0b');
+            pointer.setAttribute('font-size', '11');
+            pointer.setAttribute('font-weight', 'bold');
+            pointer.setAttribute('font-family', 'Inter, sans-serif');
+            pointer.textContent = '\u25BC YOUR CAR';
+
+            hl.appendChild(rect);
+            hl.appendChild(text);
+            hl.appendChild(pointer);
+        }
+
+        function showError(msg) { errorText.textContent = msg; searchError.style.display = 'flex'; }
+        function hideError() { searchError.style.display = 'none'; }
+
+        function resetSearch() {
+            plateInput.value = '';
+            searchBox.style.display = 'block';
+            resultsSection.style.display = 'none';
+            hideError();
+            plateInput.focus();
+        }
+
+        btnSearch.addEventListener('click', searchPlate);
+        btnNewSearch.addEventListener('click', resetSearch);
+        plateInput.addEventListener('keypress', e => { if (e.key === 'Enter') searchPlate(); });
+
+        plateInput.focus();
+        loadBays();
+    </script>
+</body>
+</html>

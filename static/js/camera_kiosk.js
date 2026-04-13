@@ -1,72 +1,66 @@
-// Camera Kiosk - ALPR-driven (no zone buttons)
-// Screens: scanning → suggestion → (auto-return to scanning)
+// ═══════════════════════════════════════════════════════════════════════════
+//  SPMS Kiosk — Animated flow with step progress
+// ═══════════════════════════════════════════════════════════════════════════
 
 let socket;
 let currentScreen = 'scanning';
 let suggestionTimeout = null;
+let countdownInterval = null;
+
+const SUGGESTION_DISPLAY_SEC = 25;
 
 document.addEventListener('DOMContentLoaded', () => {
     initSocket();
     updateClock();
     setInterval(updateClock, 1000);
-    // Periodic availability refresh
     setInterval(refreshAvailability, 5000);
+    setProgress(1);   // start at step 1
 });
 
+// ── Socket.IO ────────────────────────────────────────────────────────────────
+
 function initSocket() {
-    socket = io('http://localhost:5000');
+    socket = io(location.origin);
 
-    socket.on('connect', () => {
-        console.log('✅ Kiosk connected');
-    });
+    socket.on('connect', () => console.log('Kiosk connected'));
 
-    socket.on('initial_state', (data) => {
-        updateAvailability(data.bays);
-    });
+    socket.on('initial_state', (data) => updateAvailability(data.bays));
 
-    socket.on('bay_update', () => {
-        // Re-fetch stats to update availability count
-        refreshAvailability();
-    });
+    socket.on('bay_update', () => refreshAvailability());
 
-    // Camera is actively scanning
-    socket.on('alpr_scanning', (data) => {
-        console.log('📷 ALPR scanning');
+    socket.on('alpr_scanning', () => {
         if (currentScreen !== 'suggestion' && currentScreen !== 'priority') {
             showScreen('scanning');
+            setProgress(1);
         }
     });
 
-    // Plate confirmed – show priority selection screen
     socket.on('plate_detected', (data) => {
-        console.log('🚗 Plate detected:', data.plate);
         const el = document.getElementById('priorityPlateText');
         if (el) el.textContent = data.plate || '------';
         showScreen('priority');
+        setProgress(3);  // step 2 (detect) done, step 3 (priority) active
     });
 
-    // Suggestion ready – show bay recommendation
     socket.on('suggestion_issued', (data) => {
-        console.log('💡 Suggestion received:', data);
         showSuggestion(data);
     });
 }
 
-function refreshAvailability() {
-    fetch('/api/stats')
-        .then(r => r.json())
-        .then(data => {
-            const el = document.getElementById('totalAvailable');
-            if (el) el.textContent = data.available ?? '-';
+// ── Availability ─────────────────────────────────────────────────────────────
 
-            // If no bays available, show full screen (only if not in suggestion)
-            if (data.available === 0 && currentScreen !== 'suggestion') {
-                showScreen('full');
-            } else if (data.available > 0 && currentScreen === 'full') {
-                showScreen('scanning');
-            }
-        })
-        .catch(() => {});
+function refreshAvailability() {
+    fetch('/api/stats').then(r => r.json()).then(data => {
+        const el = document.getElementById('totalAvailable');
+        if (el) el.textContent = data.available ?? '-';
+
+        if (data.available === 0 && currentScreen !== 'suggestion') {
+            showScreen('full');
+        } else if (data.available > 0 && currentScreen === 'full') {
+            showScreen('scanning');
+            setProgress(1);
+        }
+    }).catch(() => {});
 }
 
 function updateAvailability(bays) {
@@ -76,12 +70,11 @@ function updateAvailability(bays) {
     if (el) el.textContent = available;
 }
 
+// ── Show Suggestion ──────────────────────────────────────────────────────────
+
 function showSuggestion(data) {
-    // Clear any pending auto-return
-    if (suggestionTimeout) {
-        clearTimeout(suggestionTimeout);
-        suggestionTimeout = null;
-    }
+    if (suggestionTimeout) { clearTimeout(suggestionTimeout); suggestionTimeout = null; }
+    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
 
     const bayId    = data.bayId || data.primaryBayId || '---';
     const plate    = data.plate || '';
@@ -89,7 +82,7 @@ function showSuggestion(data) {
     const category = data.category || 'GENERAL';
     const alts     = data.alternatives || [];
 
-    // Populate plate badge
+    // Plate badge
     const plateLabel = document.getElementById('detectedPlateLabel');
     const plateText  = document.getElementById('detectedPlateText');
     if (plate) {
@@ -100,7 +93,7 @@ function showSuggestion(data) {
         if (plateText)  plateText.textContent  = '------';
     }
 
-    // Populate bay info
+    // Bay info
     const bayEl   = document.getElementById('suggestedBay');
     const distEl  = document.getElementById('bayDistance');
     const walkEl  = document.getElementById('bayWalkTime');
@@ -112,7 +105,7 @@ function showSuggestion(data) {
     if (badgeEl) badgeEl.textContent = categoryBadge(category);
 
     // Alternatives
-    const grid = document.getElementById('alternativesGrid');
+    const grid    = document.getElementById('alternativesGrid');
     const section = document.getElementById('alternativesSection');
     if (grid && alts.length > 0) {
         grid.innerHTML = alts.slice(0, 3).map(a => {
@@ -125,27 +118,57 @@ function showSuggestion(data) {
     }
 
     showScreen('suggestion');
+    setProgress(4);   // all steps done, step 4 active
 
-    // Auto-return to scanning after 25 seconds
+    // Countdown bar animation
+    startCountdown();
+
+    // Auto-return
     suggestionTimeout = setTimeout(() => {
         showScreen('scanning');
+        setProgress(1);
         suggestionTimeout = null;
-    }, 25000);
+    }, SUGGESTION_DISPLAY_SEC * 1000);
 }
 
+// ── Countdown bar ────────────────────────────────────────────────────────────
+
+function startCountdown() {
+    const fill = document.getElementById('countdownFill');
+    if (!fill) return;
+    fill.style.transition = 'none';
+    fill.style.width = '100%';
+
+    // Force reflow before starting transition
+    void fill.offsetWidth;
+
+    let remaining = SUGGESTION_DISPLAY_SEC;
+    fill.style.transition = 'width 1s linear';
+
+    countdownInterval = setInterval(() => {
+        remaining--;
+        const pct = Math.max(0, (remaining / SUGGESTION_DISPLAY_SEC) * 100);
+        fill.style.width = pct + '%';
+        if (remaining <= 0) clearInterval(countdownInterval);
+    }, 1000);
+}
+
+// ── Priority Selection ───────────────────────────────────────────────────────
+
 function selectPriority(priority) {
-    console.log('Priority selected:', priority);
-    socket.emit('priority_selected', { priority: priority });
-    // Show a brief "processing" state while waiting for suggestion
+    socket.emit('priority_selected', { priority });
+    // Brief processing state
     showScreen('scanning');
+    setProgress(3, true);  // step 3 completing
 }
 
 function categoryBadge(cat) {
-    if (cat === 'POD')    return '♿ POD Reserved';
-    if (cat === 'STAFF')  return '👔 Staff';
-    if (cat === 'FAMILY') return '👨‍👩‍👧 Family';
+    if (cat === 'POD')   return '\u267F POD Reserved';
+    if (cat === 'STAFF') return '\uD83D\uDC54 Staff';
     return '';
 }
+
+// ── Screen Transitions ───────────────────────────────────────────────────────
 
 function showScreen(name) {
     document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
@@ -154,7 +177,32 @@ function showScreen(name) {
     currentScreen = name;
 }
 
+// ── Step Progress ────────────────────────────────────────────────────────────
+
+function setProgress(activeStep, processing) {
+    // Steps 1-4, lines 1-3
+    for (let i = 1; i <= 4; i++) {
+        const step = document.getElementById(`step${i}`);
+        if (!step) continue;
+
+        step.classList.remove('active', 'done');
+        if (i < activeStep) {
+            step.classList.add('done');
+        } else if (i === activeStep) {
+            step.classList.add(processing ? 'done' : 'active');
+        }
+    }
+
+    for (let i = 1; i <= 3; i++) {
+        const line = document.getElementById(`line${i}`);
+        if (!line) continue;
+        line.classList.toggle('done', i < activeStep);
+    }
+}
+
+// ── Clock ────────────────────────────────────────────────────────────────────
+
 function updateClock() {
     const el = document.getElementById('kioskTime');
-    if (el) el.textContent = new Date().toLocaleTimeString();
+    if (el) el.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
