@@ -102,7 +102,11 @@ function showSuggestion(data) {
     if (bayEl)   bayEl.textContent   = bayId;
     if (distEl)  distEl.textContent  = `${distance} meters`;
     if (walkEl)  walkEl.textContent  = `${Math.ceil(distance / 1.4)} seconds walk`;
-    if (badgeEl) badgeEl.textContent = categoryBadge(category);
+    if (badgeEl) {
+        const badge = categoryBadge(category);
+        badgeEl.innerHTML = badge;
+        badgeEl.style.display = badge ? '' : 'none';
+    }
 
     // Alternatives
     const grid    = document.getElementById('alternativesGrid');
@@ -163,8 +167,22 @@ function selectPriority(priority) {
 }
 
 function categoryBadge(cat) {
-    if (cat === 'POD')   return '\u267F POD Reserved';
-    if (cat === 'STAFF') return '\uD83D\uDC54 Staff';
+    const accessibleSvg =
+        '<svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true">' +
+        '<circle cx="12" cy="4" r="2"/>' +
+        '<path d="M19 13v-2a7 7 0 0 0-14 0v2"/>' +
+        '<path d="M12 10v6"/>' +
+        '<path d="M8 22a6 6 0 0 1 8 0"/>' +
+        '</svg>';
+    const staffSvg =
+        '<svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true">' +
+        '<rect x="3" y="7" width="18" height="13" rx="2"/>' +
+        '<path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>' +
+        '<path d="M3 13h18"/>' +
+        '</svg>';
+
+    if (cat === 'POD')   return `${accessibleSvg} <span>POD Reserved</span>`;
+    if (cat === 'STAFF') return `${staffSvg} <span>Staff</span>`;
     return '';
 }
 

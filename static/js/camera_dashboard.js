@@ -2,6 +2,18 @@
 //  SPMS Dashboard — Camera ALPR  (enhanced with timeline + animations)
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ── Icon library (inline SVG, Lucide-style stroke icons) ────────────────────
+
+const ICON = {
+    arrival:      '<svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17h-2v-6l2-5h10l2 5h2a2 2 0 0 1 2 2v4h-2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>',
+    suggestion:   '<svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+    confirmation: '<svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>',
+    camera:       '<svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
+    system:       '<svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+    accessible:   '<svg class="cat-icon-inline" viewBox="0 0 24 24" aria-hidden="true" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="4" r="2"/><path d="M19 13v-2a7 7 0 0 0-14 0v2"/><path d="M12 10v6"/><path d="M8 22a6 6 0 0 1 8 0"/></svg>',
+    staff:        '<svg class="cat-icon-inline" viewBox="0 0 24 24" aria-hidden="true" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M3 13h18"/></svg>',
+};
+
 let socket;
 let baysData = {};
 
@@ -44,25 +56,25 @@ function initSocket() {
     });
 
     socket.on('vehicle_arrival', (data) => {
-        addActivity('arrival', `Vehicle arrived (${data.priority || 'GENERAL'})`, '\u{1F6A8}');
+        addActivity('arrival', `Vehicle arrived (${data.priority || 'GENERAL'})`, ICON.arrival);
     });
 
     socket.on('suggestion_issued', (data) => {
         const plate = data.plate ? ` \u2014 ${data.plate}` : '';
-        addActivity('suggestion', `Suggested ${data.bayId}${plate}`, '\u{1F4CD}');
+        addActivity('suggestion', `Suggested ${data.bayId}${plate}`, ICON.suggestion);
         flashBay(data.bayId);
         setAlprDetected(data.plate || null);
     });
 
     socket.on('confirmation', (data) => {
-        addActivity('confirmation', `${data.bayId} confirmed`, '\u2705');
+        addActivity('confirmation', `${data.bayId} confirmed`, ICON.confirmation);
     });
 
     socket.on('alpr_scanning', () => { setAlprScanning(); });
 
     socket.on('plate_logged', (data) => {
         const label = data.plate && data.plate !== 'SCANNING\u2026' ? data.plate : 'scanning';
-        addActivity('confirmation', `Bay cam: ${label} at ${data.bayId}`, '\u{1F4F7}');
+        addActivity('confirmation', `Bay cam: ${label} at ${data.bayId}`, ICON.camera);
         if (baysData[data.bayId]) {
             baysData[data.bayId].plate = data.plate || null;
         }
@@ -125,15 +137,10 @@ function renderMap() {
         g.appendChild(rect);
         g.appendChild(label);
 
-        // Category icon
+        // Category icon (inline stroke glyph so no emoji)
         if (bay.category && bay.category !== 'GENERAL') {
-            const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            badge.setAttribute('x', bay.x + BAY_W / 2);
-            badge.setAttribute('y', bay.y + 42);
-            badge.setAttribute('text-anchor', 'middle');
-            badge.setAttribute('font-size', '11');
-            badge.textContent = categoryIcon(bay.category);
-            g.appendChild(badge);
+            const glyph = buildCategoryGlyph(bay.category, bay.x + BAY_W / 2, bay.y + 40);
+            if (glyph) g.appendChild(glyph);
         }
 
         g.style.cursor = 'pointer';
@@ -158,12 +165,13 @@ function renderMap() {
     circle.setAttribute('stroke', 'rgba(255,255,255,0.3)');
     circle.setAttribute('stroke-width', '2');
 
-    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    icon.setAttribute('x', eX);
-    icon.setAttribute('y', eY + 7);
-    icon.setAttribute('text-anchor', 'middle');
-    icon.setAttribute('font-size', '20');
-    icon.textContent = '\u{1F697}';
+    // Lucide-style "log-in" glyph as entrance marker
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    icon.setAttribute('transform', `translate(${eX - 11}, ${eY - 11}) scale(0.92)`);
+    icon.innerHTML =
+        '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '<polyline points="10 17 15 12 10 7" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '<line x1="15" y1="12" x2="3" y2="12" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
 
     const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     lbl.setAttribute('x', eX);
@@ -226,9 +234,43 @@ function flashBay(bayId) {
 }
 
 function categoryIcon(cat) {
-    if (cat === 'POD')   return '\u267F';
-    if (cat === 'STAFF') return 'S';
+    if (cat === 'POD')   return ICON.accessible;
+    if (cat === 'STAFF') return ICON.staff;
     return '';
+}
+
+function buildCategoryGlyph(category, cx, cy) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const size = 12;
+    const x = cx - size / 2;
+    const y = cy - size / 2;
+
+    const g = document.createElementNS(ns, 'g');
+    g.setAttribute('transform', `translate(${x}, ${y})`);
+    g.setAttribute('fill', 'none');
+    g.setAttribute('stroke', '#cbd5e1');
+    g.setAttribute('stroke-width', '1.4');
+    g.setAttribute('stroke-linecap', 'round');
+    g.setAttribute('stroke-linejoin', 'round');
+
+    if (category === 'POD') {
+        // Lucide-style "accessibility / person in wheelchair" mark (12×12)
+        g.innerHTML =
+            '<circle cx="6" cy="2" r="1"/>' +
+            '<path d="M9.5 6.5L6 5v2.5h3"/>' +
+            '<path d="M6 7.5v2.5"/>' +
+            '<circle cx="7" cy="10.5" r="1.2"/>';
+        return g;
+    }
+    if (category === 'STAFF') {
+        // Lucide "briefcase" in 12×12
+        g.innerHTML =
+            '<rect x="1.5" y="4" width="9" height="6.5" rx="1"/>' +
+            '<path d="M4.25 4V3a1 1 0 0 1 1-1h1.5a1 1 0 0 1 1 1v1"/>' +
+            '<line x1="1.5" y1="7" x2="10.5" y2="7"/>';
+        return g;
+    }
+    return null;
 }
 
 // ── Statistics ───────────────────────────────────────────────────────────────
@@ -267,12 +309,14 @@ function updateCategoryList() {
 
     const el = document.getElementById('categoryList');
     if (!el) return;
-    el.innerHTML = Object.entries(cats).map(([cat, data]) => `
+    el.innerHTML = Object.entries(cats).map(([cat, data]) => {
+        const glyph = categoryIcon(cat);
+        return `
         <div class="cat-row">
-            <span class="cat-badge ${cat}">${categoryIcon(cat) || ''} ${cat}</span>
+            <span class="cat-badge ${cat}">${glyph ? glyph + ' ' : ''}${cat}</span>
             <span style="color:var(--text-3); font-size:0.8rem;">${data.available}/${data.total} free</span>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 }
 
 // ── ALPR Status ──────────────────────────────────────────────────────────────
@@ -438,4 +482,72 @@ function fillBayModal(data) {
         plateEl.textContent = data.state === 'AVAILABLE' ? 'Bay is empty' : 'No plate recorded';
         plateEl.classList.add('empty');
     }
+}
+
+// ── Alerts Panel ─────────────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadAlertStatus();
+    document.getElementById('btnTestAlert')?.addEventListener('click', sendTestAlert);
+});
+
+function loadAlertStatus() {
+    fetch('/api/alerts/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+            if (!data) return;
+            const el = document.getElementById('alertStatusList');
+            if (!el) return;
+
+            const rows = [
+                { label: 'Email Alerts',   on: data.email_enabled },
+                { label: 'SMS Alerts',     on: data.sms_enabled },
+                { label: 'Daily Report',   on: data.daily_report_enabled },
+            ];
+
+            el.innerHTML = rows.map(r => `
+                <div class="alert-status-row">
+                    <span class="alert-status-dot ${r.on ? 'on' : 'off'}"></span>
+                    <span>${r.label}</span>
+                    <span style="margin-left:auto;color:${r.on ? 'var(--green)' : 'var(--text-3)'}">
+                        ${r.on ? 'ON' : 'OFF'}
+                    </span>
+                </div>`).join('') +
+                `<div style="font-size:0.72rem;color:var(--text-3);margin-top:4px;">
+                    Thresholds: ${data.high_threshold}% / ${data.critical_threshold}%
+                </div>`;
+        })
+        .catch(() => {});
+}
+
+function sendTestAlert() {
+    const btn = document.getElementById('btnTestAlert');
+    const msg = document.getElementById('alertTestMsg');
+    if (!btn) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+
+    fetch('/api/alerts/test', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (msg) {
+                msg.style.display = 'block';
+                msg.style.color = data.success ? 'var(--green)' : 'var(--red)';
+                msg.textContent = data.success ? '✓ Test sent successfully' : `✗ ${data.error}`;
+                setTimeout(() => { msg.style.display = 'none'; }, 5000);
+            }
+        })
+        .catch(() => {
+            if (msg) {
+                msg.style.display = 'block';
+                msg.style.color = 'var(--red)';
+                msg.textContent = '✗ Request failed';
+                setTimeout(() => { msg.style.display = 'none'; }, 5000);
+            }
+        })
+        .finally(() => {
+            btn.disabled = false;
+            btn.textContent = 'Send Test Alert';
+        });
 }

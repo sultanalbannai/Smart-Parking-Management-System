@@ -57,7 +57,9 @@
             <!-- Screen 1: Scanning -->
             <div class="screen" id="scanningScreen">
                 <div class="scan-ring">
-                    <div class="scan-icon">&#128247;</div>
+                    <div class="scan-icon">
+                        <svg class="icon icon-2xl" viewBox="0 0 24 24" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                    </div>
                 </div>
                 <div class="scan-title">WELCOME</div>
                 <div class="scan-subtitle">Please pull up to the entrance camera</div>
@@ -85,17 +87,23 @@
                 <p class="priority-prompt">Select your parking category</p>
                 <div class="priority-grid">
                     <button class="priority-btn general" onclick="selectPriority('GENERAL')">
-                        <div class="p-icon">&#128663;</div>
+                        <div class="p-icon">
+                            <svg class="icon icon-xl" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 17h-2v-6l2-5h10l2 5h2a2 2 0 0 1 2 2v4h-2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>
+                        </div>
                         <div class="p-label">Normal</div>
                         <div class="p-sub">General Parking</div>
                     </button>
                     <button class="priority-btn pod" onclick="selectPriority('POD')">
-                        <div class="p-icon">&#9855;</div>
+                        <div class="p-icon">
+                            <svg class="icon icon-xl" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4" r="2"/><path d="M19 13v-2a7 7 0 0 0-14 0v2"/><path d="M12 10v6"/><path d="M8 22a6 6 0 0 1 8 0"/></svg>
+                        </div>
                         <div class="p-label">Accessible</div>
                         <div class="p-sub">POD / Disability</div>
                     </button>
                     <button class="priority-btn staff" onclick="selectPriority('STAFF')">
-                        <div class="p-icon">&#128084;</div>
+                        <div class="p-icon">
+                            <svg class="icon icon-xl" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M3 13h18"/></svg>
+                        </div>
                         <div class="p-label">Staff</div>
                         <div class="p-sub">Staff Parking</div>
                     </button>
@@ -117,11 +125,15 @@
                     <div class="bay-number" id="suggestedBay">---</div>
                     <div class="bay-details">
                         <div class="detail-row">
-                            <span class="detail-icon">&#128205;</span>
+                            <span class="detail-icon">
+                                <svg class="icon icon-md" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                            </span>
                             <span class="detail-text" id="bayDistance">-- meters</span>
                         </div>
                         <div class="detail-row">
-                            <span class="detail-icon">&#128694;</span>
+                            <span class="detail-icon">
+                                <svg class="icon icon-md" viewBox="0 0 24 24" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="M10 21l2-6-3-3 3-5 3 3 3 1"/><path d="M9 12l-3 1-2 4"/></svg>
+                            </span>
                             <span class="detail-text" id="bayWalkTime">-- seconds walk</span>
                         </div>
                     </div>
@@ -141,7 +153,9 @@
 
             <!-- Screen 4: Parking Full -->
             <div class="screen hidden" id="fullScreen">
-                <div class="full-icon">&#128683;</div>
+                <div class="full-icon">
+                    <svg class="icon icon-2xl" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                </div>
                 <h2>PARKING FULL</h2>
                 <p class="full-message">All spaces are currently occupied</p>
                 <p class="full-submessage">Please check back shortly</p>

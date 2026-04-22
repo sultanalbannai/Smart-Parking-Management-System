@@ -5,12 +5,13 @@ Adds 'alpr_scanning' event so the kiosk can show the live scanning state.
 """
 
 import logging
-from flask import Flask, render_template, jsonify
+from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
 from sqlalchemy.orm import Session
 
 from src.core import Clock
 from src.models.database import Bay, BayState
+from src.services.alert_service import AlertService
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +23,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 db_session: Session = None
 message_bus = None
 _priority_queue = None          # shared queue – filled when kiosk sends priority_selected
+alert_service = AlertService()  # SMS / email notification engine
 
 
 def init_system(external_db=None, external_bus=None, priority_queue=None):
@@ -43,6 +45,7 @@ def init_system(external_db=None, external_bus=None, priority_queue=None):
         message_bus.subscribe('alpr/plate_detected',          on_plate_detected)
         message_bus.subscribe('parking/bays/plate_logged',    on_plate_logged)
 
+        alert_service.start()
         logger.info("✅ Camera web server initialized")
 
 
@@ -57,6 +60,17 @@ def on_bay_state_update(topic, payload):
         'state':     state,
         'timestamp': Clock.now().isoformat()
     }, namespace='/')
+
+    # Check occupancy thresholds and fire alerts if needed
+    if db_session:
+        try:
+            db_session.expire_all()
+            bays      = db_session.query(Bay).all()
+            total     = len(bays)
+            available = sum(1 for b in bays if b.state == BayState.AVAILABLE)
+            alert_service.check_occupancy(total=total, available=available)
+        except Exception as e:
+            logger.warning(f"Alert occupancy check failed: {e}")
 
 
 def on_parking_request(topic, payload):
@@ -222,6 +236,45 @@ def find_plate(plate):
             'distance': bay.distance_from_gate,
         })
     return jsonify({'found': False, 'plate': plate})
+
+
+@app.route('/api/alerts/status')
+def get_alert_status():
+    """Return current alert configuration status (no credentials exposed)."""
+    import configparser
+    from pathlib import Path
+    cfg = configparser.ConfigParser()
+    cfg.read(Path(__file__).parent / 'alerts.cfg')
+
+    def gb(section, key):
+        try: return cfg.getboolean(section, key)
+        except: return False
+
+    return jsonify({
+        'email_enabled':        gb('email', 'enabled'),
+        'sms_enabled':          gb('sms', 'enabled'),
+        'daily_report_enabled': gb('daily_report', 'enabled'),
+        'high_threshold':       cfg.getint('thresholds', 'high_occupancy', fallback=80),
+        'critical_threshold':   cfg.getint('thresholds', 'critical_occupancy', fallback=90),
+        'cooldown_minutes':     cfg.getint('thresholds', 'cooldown_minutes', fallback=30),
+    })
+
+
+@app.route('/api/alerts/test', methods=['POST'])
+def test_alert():
+    """Send a test alert to verify email/SMS is working."""
+    if not db_session:
+        return jsonify({'error': 'DB not ready'}), 500
+
+    try:
+        bays      = db_session.query(Bay).all()
+        total     = len(bays)
+        available = sum(1 for b in bays if b.state == BayState.AVAILABLE)
+        alert_service.send_daily_report(total=total, available=available)
+        return jsonify({'success': True, 'message': 'Test alert sent — check your inbox/phone.'})
+    except Exception as e:
+        logger.error(f"Test alert failed: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/stats')

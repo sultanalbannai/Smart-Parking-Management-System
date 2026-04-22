@@ -14,7 +14,7 @@
         <!-- Header -->
         <header class="header">
             <div class="logo">
-                <span class="logo-icon">&#9679;</span>
+                <span class="logo-icon">P</span>
                 <h1>SPMS</h1>
             </div>
             <nav class="header-nav">
@@ -81,6 +81,17 @@
                     <div id="categoryList"></div>
                 </div>
 
+                <!-- Alerts -->
+                <div class="card" id="alertsCard">
+                    <h3>
+                        <svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true" style="margin-right:6px;vertical-align:-2px"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                        Alerts
+                    </h3>
+                    <div id="alertStatusList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;"></div>
+                    <button class="btn-test-alert" id="btnTestAlert">Send Test Alert</button>
+                    <div id="alertTestMsg" style="display:none;margin-top:6px;font-size:0.75rem;"></div>
+                </div>
+
                 <!-- Legend -->
                 <div class="card">
                     <h3>Legend</h3>
@@ -94,11 +105,15 @@
                             <span>Occupied</span>
                         </div>
                         <div class="legend-item">
-                            <span class="legend-badge pod">P</span>
+                            <span class="legend-badge pod">
+                                <svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4" r="2"/><path d="M19 13v-2a7 7 0 0 0-14 0v2"/><path d="M12 10v6"/><path d="M8 22a6 6 0 0 1 8 0"/></svg>
+                            </span>
                             <span>POD Reserved</span>
                         </div>
                         <div class="legend-item">
-                            <span class="legend-badge staff">S</span>
+                            <span class="legend-badge staff">
+                                <svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M3 13h18"/></svg>
+                            </span>
                             <span>Staff Reserved</span>
                         </div>
                     </div>
@@ -111,9 +126,15 @@
                 <div class="map-header">
                     <h2>Parking Map</h2>
                     <div class="map-controls">
-                        <button class="btn-zoom" id="btnZoomIn">+</button>
-                        <button class="btn-zoom" id="btnZoomOut">&minus;</button>
-                        <button class="btn-zoom" id="btnReset">&#x27F2;</button>
+                        <button class="btn-zoom" id="btnZoomIn" aria-label="Zoom in">
+                            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        </button>
+                        <button class="btn-zoom" id="btnZoomOut" aria-label="Zoom out">
+                            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        </button>
+                        <button class="btn-zoom" id="btnReset" aria-label="Reset zoom">
+                            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                        </button>
                     </div>
                 </div>
                 <div class="map-wrapper" id="mapWrapper">
@@ -140,7 +161,9 @@
                     <h3>Live Activity</h3>
                     <div class="activity-feed" id="activityFeed">
                         <div class="activity-item system">
-                            <span class="act-icon">&#9881;</span>
+                            <span class="act-icon">
+                                <svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                            </span>
                             <div class="act-body">
                                 <div class="act-text">System initialized</div>
                                 <div class="act-time">just now</div>
@@ -156,7 +179,9 @@
     <!-- Bay detail modal -->
     <div class="bay-modal-backdrop" id="bayModalBackdrop">
         <div class="bay-modal">
-            <button class="bm-close" id="bmClose">&times;</button>
+            <button class="bm-close" id="bmClose" aria-label="Close">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
             <h2 id="bmBayId">--</h2>
             <span class="bm-cat" id="bmCategory">GENERAL</span>
             <div class="bm-row">
