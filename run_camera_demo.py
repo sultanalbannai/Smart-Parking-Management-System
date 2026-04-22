@@ -57,7 +57,11 @@ logger = logging.getLogger(__name__)
 CONFIG_PATH   = 'config/camera_demo_config.yaml'
 BAY_ROIS_PATH = 'config/bay_rois.yaml'
 GATE_ID       = 'GATE_MAIN'
-GATE_CAM_IDX  = 0   # USB gate camera index. Change if you have multiple cameras.
+
+# Read gate camera index from config (set via calibrate_bay_rois.py)
+with open(CONFIG_PATH, encoding='utf-8') as _f:
+    _cfg = yaml.safe_load(_f)
+GATE_CAM_IDX = _cfg.get('gate_camera', {}).get('camera_index', 0)
 
 
 # ── Web server ────────────────────────────────────────────────────────────────
@@ -78,7 +82,7 @@ PRIORITY_MAP = {
 }
 
 
-BAY_MON_WIN = "Bay Cameras – Live Monitor  |  q = quit"
+BAY_MON_WIN = "Bay Cameras - Live Monitor  |  q = quit"
 TILE_W, TILE_H = 640, 360
 
 

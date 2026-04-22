@@ -133,10 +133,10 @@ def assign_cameras(available_cams):
     assignments = {}   # cam_cfg original index → new chosen index
 
     print("\n" + "="*60)
-    print(" CAMERA ASSIGNMENT ".center(60))
+    print(" BAY CAMERA ASSIGNMENT ".center(60))
     print("="*60)
-    print(" For each camera group, a preview window will open.")
-    print(f" Press  1–{len(available_cams)}  to pick the camera for that group.")
+    print(" Gate camera has been assigned. Now assign bay cameras.")
+    print(f" Press  1-{len(available_cams)}  to pick the camera for each bay group.")
     print(" Press  K  to keep the existing index and skip assignment.")
     print(" Press  Q  to quit assignment (all groups keep existing).")
     print("="*60)
@@ -280,14 +280,116 @@ def apply_assignments(assignments: dict):
 
 # ── Main calibration loop ─────────────────────────────────────────────────────
 
+def assign_gate_camera(available_cams):
+    """
+    Show live previews and let the user pick which camera is the gate/entrance ALPR.
+    Returns the chosen camera index, or existing value if skipped.
+    """
+    existing_gate = cfg.get('gate_camera', {}).get('camera_index', 0)
+
+    if not available_cams:
+        return existing_gate
+
+    print("\n" + "="*60)
+    print(" GATE CAMERA ASSIGNMENT ".center(60))
+    print("="*60)
+    print(" Which camera is pointing at the ENTRANCE / GATE?")
+    print(f" Press  1-{len(available_cams)}  to select   K = keep current ({existing_gate})   Q = skip")
+    print("="*60)
+
+    caps = {}
+    for idx in available_cams:
+        cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(idx)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
+        caps[idx] = cap
+
+    win_name = "Assign Gate Camera - Entrance ALPR"
+    cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+    chosen = None
+
+    while True:
+        frames = []
+        for idx in available_cams:
+            ret, frame = caps[idx].read()
+            if not ret or frame is None:
+                frame = np.zeros((360, 640, 3), dtype=np.uint8)
+            frame = cv2.resize(frame, (640, 360))
+            num = available_cams.index(idx) + 1
+            # Highlight current gate camera in yellow
+            is_current = (idx == existing_gate)
+            colour = (0, 200, 255) if is_current else (0, 255, 255)
+            draw_text_bg(frame, f"[{num}] Camera index {idx}" + (" (current gate)" if is_current else ""),
+                         (10, 32), font_scale=0.75, thickness=2, fg=colour, bg=(0, 0, 0))
+            frames.append(frame)
+
+        # Tile grid
+        cols = min(len(frames), 3)
+        rows = (len(frames) + cols - 1) // cols
+        while len(frames) < rows * cols:
+            frames.append(np.zeros((360, 640, 3), dtype=np.uint8))
+        grid_rows = [np.hstack(frames[r*cols:(r+1)*cols]) for r in range(rows)]
+        grid = np.vstack(grid_rows)
+
+        header = np.zeros((64, grid.shape[1], 3), dtype=np.uint8)
+        draw_text_bg(header, "GATE CAMERA - Entrance / ALPR",
+                     (10, 24), font_scale=0.8, thickness=2, fg=(0, 255, 255), bg=(0, 0, 0))
+        draw_text_bg(header, f"Press 1-{len(available_cams)} to select   K = keep current ({existing_gate})   Q = skip",
+                     (10, 52), font_scale=0.55, thickness=1, fg=(180, 220, 255), bg=(0, 0, 0))
+
+        cv2.imshow(win_name, np.vstack([header, grid]))
+        key = cv2.waitKey(1) & 0xFF
+
+        for n, cam_idx in enumerate(available_cams, start=1):
+            if key == ord(str(n)):
+                chosen = cam_idx
+                break
+
+        if chosen is not None:
+            break
+        if key in (ord('k'), ord('K')):
+            chosen = existing_gate
+            print(f"  Keeping existing gate camera index {existing_gate}")
+            break
+        if key in (ord('q'), ord('Q')):
+            chosen = existing_gate
+            print("  Skipped gate assignment")
+            break
+
+    for cap in caps.values():
+        cap.release()
+    cv2.destroyWindow(win_name)
+
+    # Save to config
+    if chosen != existing_gate:
+        if 'gate_camera' not in cfg:
+            cfg['gate_camera'] = {}
+        cfg['gate_camera']['camera_index'] = chosen
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            yaml.dump(cfg, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        print(f"  Gate camera: index {existing_gate} -> {chosen} saved to config")
+    else:
+        print(f"  Gate camera stays at index {chosen}")
+
+    return chosen
+
+
 def calibrate():
-    # ── Step 1: Detect cameras and let user assign them ───────────────────────
+    # ── Step 1: Detect all cameras ────────────────────────────────────────────
     available = detect_cameras()
-    if len(available) > 1 or (len(available) == 1 and available[0] != bay_cameras[0].get("camera_index")):
-        assignments = assign_cameras(available)
+
+    # ── Step 2: Assign gate camera first ─────────────────────────────────────
+    gate_idx = assign_gate_camera(available)
+
+    # ── Step 3: Assign bay cameras (excluding the gate camera) ───────────────
+    bay_available = [i for i in available if i != gate_idx]
+    if bay_available:
+        assignments = assign_cameras(bay_available)
         apply_assignments(assignments)
     else:
-        print("\nOnly one camera found or indexes already match — skipping assignment step.")
+        print("\nNo remaining cameras for bay assignment after gate camera selected.")
 
     # ── Step 2: ROI drawing ───────────────────────────────────────────────────
     existing: dict = {}

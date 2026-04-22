@@ -1,81 +1,112 @@
-# Camera Demo Configuration - Single Entrance, 16 Bays
-# 2 STAFF + 2 POD (entrance row)  +  12 GENERAL (3 rows x 4)  =  16 bays total
-#
-# Bay numbering goes column by column, nearest-to-farthest within each column:
-#
-#  Row 4 (farthest)   G-03   G-06   G-09   G-12   [General]
-#  Row 3              G-02   G-05   G-08   G-11   [General]
-#  Row 2              G-01   G-04   G-07   G-10   [General]
-#  Row 1 (entrance)   STF-01 POD-01 POD-02 STF-02 [Staff|POD|POD|Staff]
-#                              [MAIN ENTRANCE]
-#
-# SVG viewBox : 0 0 1200 850
-# Bay size    : 80 x 48 px
-# x positions: 380, 500, 620, 740
-# ─────────────────────────────────────────────────────────────────────────────
-
-facility_name: "Smart Parking System - Camera Demo"
-facility_id: "DEMO_CAMERA_001"
-
-database_path: "data/spms.db"
-
+facility_name: Smart Parking System - Camera Demo
+facility_id: DEMO_CAMERA_001
+database_path: data/spms.db
 map_width: 1200
 map_height: 850
-
 parking_zones:
-  - zone_id: "MAIN"
-    zone_name: "Main Parking"
-    entrance_id: "ENTRANCE_MAIN"
-    entrance_name: "Main Entrance"
-    entrance_color: "#3B82F6"
-    entrance_x: 600
-    entrance_y: 760
-
-    bays:
-      # ── Row 4 (y=170) – General, farthest ────────────────────────────────
-      - {id: "G-03",   category: "GENERAL", distance: 85, x: 380, y: 170}
-      - {id: "G-06",   category: "GENERAL", distance: 87, x: 500, y: 170}
-      - {id: "G-09",   category: "GENERAL", distance: 89, x: 620, y: 170}
-      - {id: "G-12",   category: "GENERAL", distance: 91, x: 740, y: 170}
-
-      # ── Row 3 (y=300) – General ───────────────────────────────────────────
-      - {id: "G-02",   category: "GENERAL", distance: 60, x: 380, y: 300}
-      - {id: "G-05",   category: "GENERAL", distance: 62, x: 500, y: 300}
-      - {id: "G-08",   category: "GENERAL", distance: 64, x: 620, y: 300}
-      - {id: "G-11",   category: "GENERAL", distance: 66, x: 740, y: 300}
-
-      # ── Row 2 (y=430) – General ───────────────────────────────────────────
-      - {id: "G-01",   category: "GENERAL", distance: 40, x: 380, y: 430}
-      - {id: "G-04",   category: "GENERAL", distance: 42, x: 500, y: 430}
-      - {id: "G-07",   category: "GENERAL", distance: 44, x: 620, y: 430}
-      - {id: "G-10",   category: "GENERAL", distance: 46, x: 740, y: 430}
-
-      # ── Row 1 (y=560) – Entrance row: Staff (outer) + POD (inner) ─────────
-      - {id: "STF-01", category: "STAFF",   distance: 25, x: 380, y: 560}
-      - {id: "POD-01", category: "POD",     distance: 27, x: 500, y: 560}
-      - {id: "POD-02", category: "POD",     distance: 29, x: 620, y: 560}
-      - {id: "STF-02", category: "STAFF",   distance: 31, x: 740, y: 560}
+- zone_id: MAIN
+  zone_name: Main Parking
+  entrance_id: ENTRANCE_MAIN
+  entrance_name: Main Entrance
+  entrance_color: '#3B82F6'
+  entrance_x: 600
+  entrance_y: 760
+  bays:
+  - id: G-03
+    category: GENERAL
+    distance: 85
+    x: 380
+    y: 170
+  - id: G-06
+    category: GENERAL
+    distance: 87
+    x: 500
+    y: 170
+  - id: G-09
+    category: GENERAL
+    distance: 89
+    x: 620
+    y: 170
+  - id: G-12
+    category: GENERAL
+    distance: 91
+    x: 740
+    y: 170
+  - id: G-02
+    category: GENERAL
+    distance: 60
+    x: 380
+    y: 300
+  - id: G-05
+    category: GENERAL
+    distance: 62
+    x: 500
+    y: 300
+  - id: G-08
+    category: GENERAL
+    distance: 64
+    x: 620
+    y: 300
+  - id: G-11
+    category: GENERAL
+    distance: 66
+    x: 740
+    y: 300
+  - id: G-01
+    category: GENERAL
+    distance: 40
+    x: 380
+    y: 430
+  - id: G-04
+    category: GENERAL
+    distance: 42
+    x: 500
+    y: 430
+  - id: G-07
+    category: GENERAL
+    distance: 44
+    x: 620
+    y: 430
+  - id: G-10
+    category: GENERAL
+    distance: 46
+    x: 740
+    y: 430
+  - id: STF-01
+    category: STAFF
+    distance: 25
+    x: 380
+    y: 560
+  - id: POD-01
+    category: POD
+    distance: 27
+    x: 500
+    y: 560
+  - id: POD-02
+    category: POD
+    distance: 29
+    x: 620
+    y: 560
+  - id: STF-02
+    category: STAFF
+    distance: 31
+    x: 740
+    y: 560
+# ── Gate camera (entrance ALPR) ───────────────────────────────────────────────
+gate_camera:
+  camera_index: 0
+  label: "Gate Camera - ALPR"
 
 # ── Bay-camera assignment ─────────────────────────────────────────────────────
-# Each camera monitors only the specific bays listed under 'bays'.
-# Cameras do NOT need to cover full rows - assign only what each camera can see.
-# ROI pixel coordinates are set by:  python calibrate_bay_rois.py
-#
-# Available bay IDs:
-#   General  : G-01 .. G-12
-#   POD      : POD-01, POD-02
-#   Staff    : STF-01, STF-02
-#
 bay_cameras:
-  - camera_index: 1
-    label: "Camera 1 – Bay G-04"
-    bays: [G-04]
-
-  - camera_index: 2
-    label: "Camera 2 – Bay G-10"
-    bays: [G-10]
-
-# System behaviour
+- camera_index: 1
+  label: "Camera 1 - Bay G-04"
+  bays:
+  - G-04
+- camera_index: 2
+  label: "Camera 2 - Bay G-10"
+  bays:
+  - G-10
 suggestion_mode: true
 confirmation_timeout_sec: 300
-log_level: "INFO"
+log_level: INFO

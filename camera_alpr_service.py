@@ -257,7 +257,7 @@ class CameraALPRService:
                 cv2.rectangle(display, (zx1, zy1), (zx2, zy2), (0, 200, 255), 3)
                 cv2.putText(display, "SNAP – reading plate...",
                             (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 200, 255), 2)
-                cv2.imshow('Gate Camera – ALPR', display)
+                cv2.imshow('Gate Camera - ALPR', display)
                 cv2.waitKey(1)
 
                 plate, conf = self.read_license_plate(snap_frame)
@@ -271,7 +271,7 @@ class CameraALPRService:
                     logger.info("Snap: no plate found – resuming scan")
                     cv2.putText(display, "No plate found – reposition",
                                 (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 60, 255), 2)
-                    cv2.imshow('Gate Camera – ALPR', display)
+                    cv2.imshow('Gate Camera - ALPR', display)
                     if get_bay_frame:
                         try:
                             cv2.imshow(BAY_WIN, get_bay_frame())
@@ -283,7 +283,7 @@ class CameraALPRService:
                     last_trigger = time.time()
                     continue
 
-            cv2.imshow('Gate Camera – ALPR', display)
+            cv2.imshow('Gate Camera - ALPR', display)
             if get_bay_frame:
                 try:
                     cv2.imshow(BAY_WIN, get_bay_frame())
