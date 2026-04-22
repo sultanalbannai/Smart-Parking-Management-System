@@ -244,7 +244,7 @@ def get_alert_status():
     import configparser
     from pathlib import Path
     cfg = configparser.ConfigParser()
-    cfg.read(Path(__file__).parent / 'alerts.cfg')
+    cfg.read(Path(__file__).parent / 'alerts.cfg', encoding='utf-8')
 
     def gb(section, key):
         try: return cfg.getboolean(section, key)

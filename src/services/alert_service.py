@@ -50,7 +50,7 @@ class AlertService:
 
     def __init__(self):
         self._cfg = configparser.ConfigParser()
-        self._cfg.read(_CFG_PATH)
+        self._cfg.read(_CFG_PATH, encoding='utf-8')
 
         # Cooldown tracking: alert_type → datetime of last send
         self._last_sent: dict[str, datetime] = {}

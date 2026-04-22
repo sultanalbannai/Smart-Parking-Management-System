@@ -92,19 +92,16 @@ parking_zones:
     distance: 31
     x: 740
     y: 560
-# ── Gate camera (entrance ALPR) ───────────────────────────────────────────────
 gate_camera:
-  camera_index: 0
-  label: "Gate Camera - ALPR"
-
-# ── Bay-camera assignment ─────────────────────────────────────────────────────
+  camera_index: 2
+  label: Gate Camera - ALPR
 bay_cameras:
 - camera_index: 1
-  label: "Camera 1 - Bay G-04"
+  label: Camera 1 - Bay G-04
   bays:
   - G-04
-- camera_index: 2
-  label: "Camera 2 - Bay G-10"
+- camera_index: 0
+  label: Camera 2 - Bay G-10
   bays:
   - G-10
 suggestion_mode: true
