@@ -74,30 +74,47 @@ def draw_text_bg(img, text, pos, font_scale=0.6, thickness=1,
 # ── Camera detection ──────────────────────────────────────────────────────────
 
 def detect_cameras(max_index=8):
-    """Return list of available camera indexes."""
+    """
+    Return list of unique available camera indexes.
+    Deduplicates cameras that appear under multiple indexes on Windows
+    by comparing frames — identical frames = same physical camera.
+    """
     print("\nScanning for connected cameras...")
-    found = []
+    candidates = []
     for i in range(max_index):
-        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)  # CAP_DSHOW faster on Windows
-        if cap.isOpened():
-            ret, _ = cap.read()
-            if ret:
-                found.append(i)
-                print(f"  [index {i}] ✓ Camera found")
-            cap.release()
-        else:
-            pass  # silently skip
-    if not found:
-        # Fallback: try without CAP_DSHOW
-        for i in range(max_index):
+        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+        if not cap.isOpened():
             cap = cv2.VideoCapture(i)
-            if cap.isOpened():
-                ret, _ = cap.read()
+        if cap.isOpened():
+            # Grab a few frames to let auto-exposure settle
+            frame = None
+            for _ in range(3):
+                ret, f = cap.read()
                 if ret:
-                    found.append(i)
-                cap.release()
-    print(f"\n  Found {len(found)} camera(s): {found}")
-    return found
+                    frame = f
+            cap.release()
+            if frame is not None:
+                candidates.append((i, frame))
+
+    # Deduplicate: drop indexes whose frame is near-identical to an earlier one
+    unique = []
+    seen_frames = []
+    for idx, frame in candidates:
+        small = cv2.resize(frame, (64, 36))
+        is_dup = False
+        for seen in seen_frames:
+            diff = np.mean(np.abs(small.astype(float) - seen.astype(float)))
+            if diff < 8.0:   # very similar → same physical camera
+                print(f"  [index {idx}] duplicate of earlier camera — skipped")
+                is_dup = True
+                break
+        if not is_dup:
+            unique.append(idx)
+            seen_frames.append(small)
+            print(f"  [index {idx}] Camera found")
+
+    print(f"\n  Found {len(unique)} unique camera(s): {unique}")
+    return unique
 
 # ── Camera assignment UI ──────────────────────────────────────────────────────
 
@@ -146,7 +163,7 @@ def assign_cameras(available_cams):
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
             caps[idx] = cap
 
-        win_name = f"Assign camera → {label}"
+        win_name = f"Assign camera - {label}"
         cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
 
         chosen = None
@@ -306,7 +323,7 @@ def calibrate():
         cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-        win_name = f"Calibrate – {label}"
+        win_name = f"Calibrate - {label}"
         cv2.namedWindow(win_name)
         cv2.setMouseCallback(win_name, mouse_cb)
 
