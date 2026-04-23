@@ -10,6 +10,7 @@ Detection strategy:
   4. EasyOCR runs once on that snapshot and the plate is returned.
 """
 
+import os
 import re
 import time
 import cv2
@@ -27,6 +28,14 @@ def _cuda_available():
         return torch.cuda.is_available()
     except ImportError:
         return False
+
+def _has_display() -> bool:
+    """Return True if an X / Wayland display is reachable for OpenCV windows."""
+    if os.name == 'nt':          # Windows always has a display
+        return True
+    return bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+
+_HAS_DISPLAY = _has_display()
 
 logger = logging.getLogger(__name__)
 
@@ -211,7 +220,8 @@ class CameraALPRService:
         while True:
             if (datetime.now() - start_time).seconds > timeout:
                 logger.warning("Vehicle detection timeout")
-                cv2.destroyAllWindows()
+                if _HAS_DISPLAY:
+                    cv2.destroyAllWindows()
                 return None, None
 
             frame = self.capture_frame()
@@ -299,19 +309,23 @@ class CameraALPRService:
                     if plate:
                         last_trigger = time.time()
                         logger.info(f"Plate detected: {plate}  conf={conf:.2f}")
-                        cv2.destroyAllWindows()
+                        if _HAS_DISPLAY:
+                            cv2.destroyAllWindows()
                         return plate, snap_frame
                     else:
                         logger.info("Snap: no plate found – resuming scan")
-                        cv2.putText(display, "No plate found – reposition",
-                                    (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 60, 255), 2)
-                        cv2.imshow('Gate Camera - ALPR', display)
-                        if get_bay_frame:
-                            try:
-                                cv2.imshow(BAY_WIN, get_bay_frame())
-                            except Exception:
-                                pass
-                        cv2.waitKey(800)
+                        if _HAS_DISPLAY:
+                            cv2.putText(display, "No plate found – reposition",
+                                        (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 60, 255), 2)
+                            cv2.imshow('Gate Camera - ALPR', display)
+                            if get_bay_frame:
+                                try:
+                                    cv2.imshow(BAY_WIN, get_bay_frame())
+                                except Exception:
+                                    pass
+                            cv2.waitKey(800)
+                        else:
+                            time.sleep(0.8)
                         snapped        = False
                         snap_frame     = None
                         _ocr_done[0]   = False
@@ -319,17 +333,20 @@ class CameraALPRService:
                         last_trigger   = time.time()
                         continue
 
-            cv2.imshow('Gate Camera - ALPR', display)
-            if get_bay_frame:
-                try:
-                    cv2.imshow(BAY_WIN, get_bay_frame())
-                except Exception:
-                    pass
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord('q'):
-                logger.info("User quit camera")
-                cv2.destroyAllWindows()
-                return None, None
+            if _HAS_DISPLAY:
+                cv2.imshow('Gate Camera - ALPR', display)
+                if get_bay_frame:
+                    try:
+                        cv2.imshow(BAY_WIN, get_bay_frame())
+                    except Exception:
+                        pass
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q'):
+                    logger.info("User quit camera")
+                    cv2.destroyAllWindows()
+                    return None, None
+            else:
+                time.sleep(0.033)   # ~30 fps pacing when headless
 
     # ── Legacy helper ─────────────────────────────────────────────────────────
 

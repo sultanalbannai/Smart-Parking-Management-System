@@ -39,9 +39,18 @@ from src.services.confirmation import ConfirmationService
 from camera_alpr_service import CameraALPRService
 from bay_camera_service import load_bay_cameras
 
+import os
 import cv2
 import numpy as np
 import yaml
+
+def _has_display() -> bool:
+    """Return True if an X / Wayland display is reachable for OpenCV windows."""
+    if os.name == 'nt':
+        return True
+    return bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+
+_HAS_DISPLAY = _has_display()
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -192,7 +201,7 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
                 break
             except queue.Empty:
                 pass
-            if bay_cam_services:
+            if bay_cam_services and _HAS_DISPLAY:
                 cv2.imshow(BAY_MON_WIN, _build_bay_tiles(bay_cam_services))
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     stop_repeat.set()
@@ -284,7 +293,11 @@ def main():
         cfg = yaml.safe_load(f)
 
     print(f"🏬 {cfg['facility_name']}")
-    print(f"🗄️  DB: {cfg['database_path']}\n")
+    print(f"🗄️  DB: {cfg['database_path']}")
+    if not _HAS_DISPLAY:
+        print("ℹ️  No display detected – running headless (no OpenCV preview windows)\n")
+    else:
+        print()
 
     # Database
     db      = Database(f"sqlite:///{cfg['database_path']}")
@@ -401,7 +414,8 @@ def main():
         print("\n\n👋 Interrupted")
 
     finally:
-        cv2.destroyAllWindows()
+        if _HAS_DISPLAY:
+            cv2.destroyAllWindows()
         gate_cam.stop_camera()
         for svc in bay_cam_services:
             svc.stop()
