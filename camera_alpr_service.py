@@ -46,11 +46,11 @@ def _has_display() -> bool:
     except Exception:
         return False             # DISPLAY set but not accessible (SSH without xhost)
 
+logger = logging.getLogger(__name__)
+
 _HAS_DISPLAY = _has_display()
 if not _HAS_DISPLAY:
     logger.info("No accessible display – running in headless mode (no preview windows)")
-
-logger = logging.getLogger(__name__)
 
 # ── Tuning ────────────────────────────────────────────────────────────────────
 MIN_CONF            = 0.35   # minimum EasyOCR confidence to accept
