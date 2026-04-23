@@ -45,10 +45,21 @@ import numpy as np
 import yaml
 
 def _has_display() -> bool:
-    """Return True if an X / Wayland display is reachable for OpenCV windows."""
+    """
+    Return True only when OpenCV can actually open a GUI window.
+    Probes for real so that SSH sessions with a stale DISPLAY variable
+    (common on Jetson) are correctly treated as headless.
+    """
     if os.name == 'nt':
         return True
-    return bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+    if not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
+        return False
+    try:
+        cv2.namedWindow('__probe__', cv2.WINDOW_NORMAL)
+        cv2.destroyWindow('__probe__')
+        return True
+    except Exception:
+        return False
 
 _HAS_DISPLAY = _has_display()
 

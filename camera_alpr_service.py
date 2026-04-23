@@ -30,12 +30,25 @@ def _cuda_available():
         return False
 
 def _has_display() -> bool:
-    """Return True if an X / Wayland display is reachable for OpenCV windows."""
+    """
+    Return True only when OpenCV can actually open a GUI window.
+    Checking DISPLAY is not enough on Jetson – the variable may be set even
+    when the SSH session has no xhost permission.  We probe for real.
+    """
     if os.name == 'nt':          # Windows always has a display
         return True
-    return bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+    if not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
+        return False             # no display variable at all – definitely headless
+    try:
+        cv2.namedWindow('__probe__', cv2.WINDOW_NORMAL)
+        cv2.destroyWindow('__probe__')
+        return True
+    except Exception:
+        return False             # DISPLAY set but not accessible (SSH without xhost)
 
 _HAS_DISPLAY = _has_display()
+if not _HAS_DISPLAY:
+    logger.info("No accessible display – running in headless mode (no preview windows)")
 
 logger = logging.getLogger(__name__)
 
