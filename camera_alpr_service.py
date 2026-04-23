@@ -62,6 +62,7 @@ def _imshow(win: str, frame) -> None:
 
 def _waitkey(ms: int = 1) -> int:
     """cv2.waitKey that returns –1 (no key pressed) when headless."""
+    global _HAS_DISPLAY
     if not _HAS_DISPLAY:
         if ms > 0:
             time.sleep(ms / 1000.0)
