@@ -191,7 +191,22 @@ class CameraALPRService:
         snap_frame   = None
         snapped      = False
 
-        BAY_WIN = "Bay Cameras – Live Monitor  |  q = quit"
+        # OCR runs in a background thread so the display loop never freezes
+        _ocr_result  = [None]   # [plate_or_None]
+        _ocr_conf    = [0.0]
+        _ocr_running = [False]
+        _ocr_done    = [False]
+
+        import threading as _threading
+
+        def _run_ocr(frame_to_read):
+            plate, conf = self.read_license_plate(frame_to_read)
+            _ocr_result[0] = plate
+            _ocr_conf[0]   = conf if conf else 0.0
+            _ocr_done[0]   = True
+            _ocr_running[0] = False
+
+        BAY_WIN = "Bay Cameras - Live Monitor  |  q = quit"
 
         while True:
             if (datetime.now() - start_time).seconds > timeout:
@@ -261,36 +276,48 @@ class CameraALPRService:
                                 (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 120, 255), 2)
 
             else:
-                # ── Show frozen snapshot and run OCR ──────────────────────
+                # ── Show frozen snapshot while OCR runs in background ─────
                 display = snap_frame.copy()
                 cv2.rectangle(display, (zx1, zy1), (zx2, zy2), (0, 200, 255), 3)
-                cv2.putText(display, "SNAP – reading plate...",
-                            (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 200, 255), 2)
-                cv2.imshow('Gate Camera - ALPR', display)
-                cv2.waitKey(1)
 
-                plate, conf = self.read_license_plate(snap_frame)
+                if not _ocr_running[0] and not _ocr_done[0]:
+                    # Start OCR thread once
+                    _ocr_running[0] = True
+                    _threading.Thread(
+                        target=_run_ocr, args=(snap_frame.copy(),), daemon=True
+                    ).start()
 
-                if plate:
-                    last_trigger = time.time()
-                    logger.info(f"Plate detected: {plate}  conf={conf:.2f}")
-                    cv2.destroyAllWindows()
-                    return plate, snap_frame
-                else:
-                    logger.info("Snap: no plate found – resuming scan")
-                    cv2.putText(display, "No plate found – reposition",
-                                (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 60, 255), 2)
-                    cv2.imshow('Gate Camera - ALPR', display)
-                    if get_bay_frame:
-                        try:
-                            cv2.imshow(BAY_WIN, get_bay_frame())
-                        except Exception:
-                            pass
-                    cv2.waitKey(800)
-                    snapped      = False
-                    snap_frame   = None
-                    last_trigger = time.time()
-                    continue
+                if _ocr_running[0]:
+                    # Animate dots while waiting — window stays responsive
+                    dots = '.' * (int(time.time() * 2) % 4)
+                    cv2.putText(display, f"Reading plate{dots}",
+                                (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 200, 255), 2)
+
+                elif _ocr_done[0]:
+                    plate = _ocr_result[0]
+                    conf  = _ocr_conf[0]
+                    if plate:
+                        last_trigger = time.time()
+                        logger.info(f"Plate detected: {plate}  conf={conf:.2f}")
+                        cv2.destroyAllWindows()
+                        return plate, snap_frame
+                    else:
+                        logger.info("Snap: no plate found – resuming scan")
+                        cv2.putText(display, "No plate found – reposition",
+                                    (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 60, 255), 2)
+                        cv2.imshow('Gate Camera - ALPR', display)
+                        if get_bay_frame:
+                            try:
+                                cv2.imshow(BAY_WIN, get_bay_frame())
+                            except Exception:
+                                pass
+                        cv2.waitKey(800)
+                        snapped        = False
+                        snap_frame     = None
+                        _ocr_done[0]   = False
+                        _ocr_result[0] = None
+                        last_trigger   = time.time()
+                        continue
 
             cv2.imshow('Gate Camera - ALPR', display)
             if get_bay_frame:
