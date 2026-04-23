@@ -18,12 +18,16 @@ import re
 import time
 import threading
 import logging
+import warnings
 import yaml
 import cv2
 import numpy as np
 import easyocr
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+# Suppress torch DataLoader pin_memory warning on CPU-only devices (e.g. Jetson without CUDA)
+warnings.filterwarnings('ignore', message=".*pin_memory.*")
 
 def _cuda_available():
     try:
