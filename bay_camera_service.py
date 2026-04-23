@@ -32,6 +32,27 @@ def _cuda_available():
     except ImportError:
         return False
 
+# ── Shared singleton resources (loaded once, reused across all cameras) ───────
+
+_shared_yolo = None
+_shared_ocr  = None
+_model_lock  = threading.Lock()
+
+def _get_yolo():
+    global _shared_yolo
+    with _model_lock:
+        if _shared_yolo is None:
+            from ultralytics import YOLO
+            _shared_yolo = YOLO("yolov8n.pt")
+    return _shared_yolo
+
+def _get_ocr():
+    global _shared_ocr
+    with _model_lock:
+        if _shared_ocr is None:
+            _shared_ocr = easyocr.Reader(['en'], gpu=_cuda_available(), verbose=False)
+    return _shared_ocr
+
 logger = logging.getLogger(__name__)
 
 # ── Tuning ────────────────────────────────────────────────────────────────────
@@ -115,11 +136,10 @@ class BayCameraService:
         self._ocr_retry: Dict[str, int] = {b: 0 for b in bay_ids}
 
         logger.info(f"[{self.label}] Loading YOLOv8n …")
-        from ultralytics import YOLO
-        self._yolo = YOLO("yolov8n.pt")
+        self._yolo = _get_yolo()
 
         logger.info(f"[{self.label}] Loading EasyOCR …")
-        self._ocr = easyocr.Reader(['en'], gpu=_cuda_available(), verbose=False)
+        self._ocr = _get_ocr()
 
         logger.info(f"[{self.label}] Ready – watching bays: {bay_ids}")
 
