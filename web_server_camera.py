@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'spms-camera-demo-secret'
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 db_session: Session = None
 message_bus = None
@@ -300,7 +300,7 @@ def get_stats():
 
 @socketio.on('connect')
 def handle_connect():
-    logger.info('Client connected')
+    logger.info(f'Client connected  (sid={request.sid})')
 
     if db_session:
         try:
