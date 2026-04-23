@@ -21,6 +21,13 @@ import numpy as np
 import easyocr
 from sqlalchemy.orm import Session
 
+def _cuda_available():
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
 logger = logging.getLogger(__name__)
 
 # ── Tuning ────────────────────────────────────────────────────────────────────
@@ -70,7 +77,9 @@ class CameraALPRService:
         self.is_camera_ready = False
 
         logger.info("Loading EasyOCR model (first run may take a minute)...")
-        self.reader = easyocr.Reader(['en'], gpu=False)
+        _use_gpu = _cuda_available()
+        logger.info(f"EasyOCR GPU: {'enabled' if _use_gpu else 'disabled (no CUDA)'}")
+        self.reader = easyocr.Reader(['en'], gpu=_use_gpu)
         logger.info(f"Camera ALPR (EasyOCR) initialised for gate {gate_id}")
 
     # ── Camera lifecycle ──────────────────────────────────────────────────────

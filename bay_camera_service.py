@@ -25,6 +25,13 @@ import easyocr
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+def _cuda_available():
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
 logger = logging.getLogger(__name__)
 
 # ── Tuning ────────────────────────────────────────────────────────────────────
@@ -112,7 +119,7 @@ class BayCameraService:
         self._yolo = YOLO("yolov8n.pt")
 
         logger.info(f"[{self.label}] Loading EasyOCR …")
-        self._ocr = easyocr.Reader(['en'], gpu=False, verbose=False)
+        self._ocr = easyocr.Reader(['en'], gpu=_cuda_available(), verbose=False)
 
         logger.info(f"[{self.label}] Ready – watching bays: {bay_ids}")
 
