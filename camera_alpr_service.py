@@ -29,28 +29,56 @@ def _cuda_available():
     except ImportError:
         return False
 
-def _has_display() -> bool:
-    """
-    Return True only when OpenCV can actually open a GUI window.
-    Checking DISPLAY is not enough on Jetson – the variable may be set even
-    when the SSH session has no xhost permission.  We probe for real.
-    """
-    if os.name == 'nt':          # Windows always has a display
-        return True
-    if not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')):
-        return False             # no display variable at all – definitely headless
-    try:
-        cv2.namedWindow('__probe__', cv2.WINDOW_NORMAL)
-        cv2.destroyWindow('__probe__')
-        return True
-    except Exception:
-        return False             # DISPLAY set but not accessible (SSH without xhost)
-
 logger = logging.getLogger(__name__)
 
-_HAS_DISPLAY = _has_display()
-if not _HAS_DISPLAY:
-    logger.info("No accessible display – running in headless mode (no preview windows)")
+# ── Display helpers (self-disabling on first error) ───────────────────────────
+# Start optimistic: show windows if DISPLAY is set.  The first cv2.imshow()
+# that raises (e.g. SSH session where DISPLAY=:0 is set but not reachable)
+# flips _HAS_DISPLAY to False and all subsequent calls become no-ops.
+_HAS_DISPLAY: bool = (
+    os.name == 'nt'
+    or bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+)
+_display_warned = False
+
+
+def _imshow(win: str, frame) -> None:
+    """cv2.imshow that silently disables itself on the first GTK/display error."""
+    global _HAS_DISPLAY, _display_warned
+    if not _HAS_DISPLAY:
+        return
+    try:
+        cv2.imshow(win, frame)
+    except Exception as exc:
+        _HAS_DISPLAY = False
+        if not _display_warned:
+            _display_warned = True
+            logger.warning(f"Display unavailable ({exc}) – switching to headless mode")
+        try:
+            cv2.destroyAllWindows()
+        except Exception:
+            pass
+
+
+def _waitkey(ms: int = 1) -> int:
+    """cv2.waitKey that returns –1 (no key pressed) when headless."""
+    if not _HAS_DISPLAY:
+        if ms > 0:
+            time.sleep(ms / 1000.0)
+        return -1
+    try:
+        return cv2.waitKey(ms) & 0xFF
+    except Exception:
+        _HAS_DISPLAY = False
+        return -1
+
+
+def _destroy_all() -> None:
+    try:
+        cv2.destroyAllWindows()
+    except Exception:
+        pass
+# ─────────────────────────────────────────────────────────────────────────────
 
 # ── Tuning ────────────────────────────────────────────────────────────────────
 MIN_CONF            = 0.35   # minimum EasyOCR confidence to accept
@@ -233,8 +261,7 @@ class CameraALPRService:
         while True:
             if (datetime.now() - start_time).seconds > timeout:
                 logger.warning("Vehicle detection timeout")
-                if _HAS_DISPLAY:
-                    cv2.destroyAllWindows()
+                _destroy_all()
                 return None, None
 
             frame = self.capture_frame()
@@ -322,23 +349,19 @@ class CameraALPRService:
                     if plate:
                         last_trigger = time.time()
                         logger.info(f"Plate detected: {plate}  conf={conf:.2f}")
-                        if _HAS_DISPLAY:
-                            cv2.destroyAllWindows()
+                        _destroy_all()
                         return plate, snap_frame
                     else:
                         logger.info("Snap: no plate found – resuming scan")
-                        if _HAS_DISPLAY:
-                            cv2.putText(display, "No plate found – reposition",
-                                        (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 60, 255), 2)
-                            cv2.imshow('Gate Camera - ALPR', display)
-                            if get_bay_frame:
-                                try:
-                                    cv2.imshow(BAY_WIN, get_bay_frame())
-                                except Exception:
-                                    pass
-                            cv2.waitKey(800)
-                        else:
-                            time.sleep(0.8)
+                        cv2.putText(display, "No plate found – reposition",
+                                    (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 60, 255), 2)
+                        _imshow('Gate Camera - ALPR', display)
+                        if get_bay_frame:
+                            try:
+                                _imshow(BAY_WIN, get_bay_frame())
+                            except Exception:
+                                pass
+                        _waitkey(800)
                         snapped        = False
                         snap_frame     = None
                         _ocr_done[0]   = False
@@ -346,20 +369,18 @@ class CameraALPRService:
                         last_trigger   = time.time()
                         continue
 
-            if _HAS_DISPLAY:
-                cv2.imshow('Gate Camera - ALPR', display)
-                if get_bay_frame:
-                    try:
-                        cv2.imshow(BAY_WIN, get_bay_frame())
-                    except Exception:
-                        pass
-                key = cv2.waitKey(1) & 0xFF
-                if key == ord('q'):
-                    logger.info("User quit camera")
-                    cv2.destroyAllWindows()
-                    return None, None
-            else:
-                time.sleep(0.033)   # ~30 fps pacing when headless
+            # ── Per-frame display ─────────────────────────────────────────
+            _imshow('Gate Camera - ALPR', display)
+            if get_bay_frame:
+                try:
+                    _imshow(BAY_WIN, get_bay_frame())
+                except Exception:
+                    pass
+            key = _waitkey(1)
+            if key == ord('q'):
+                logger.info("User quit camera")
+                _destroy_all()
+                return None, None
 
     # ── Legacy helper ─────────────────────────────────────────────────────────
 
