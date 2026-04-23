@@ -5,7 +5,10 @@ Adds 'alpr_scanning' event so the kiosk can show the live scanning state.
 """
 
 import logging
-from flask import Flask, render_template, jsonify, request
+import time
+import numpy as np
+import cv2
+from flask import Flask, render_template, jsonify, request, Response
 from flask_socketio import SocketIO, emit
 from sqlalchemy.orm import Session
 
@@ -24,6 +27,62 @@ db_session: Session = None
 message_bus = None
 _priority_queue = None          # shared queue – filled when kiosk sends priority_selected
 alert_service = AlertService()  # SMS / email notification engine
+
+# ── Camera services (registered after startup) ────────────────────────────────
+_gate_camera = None
+_bay_cameras  = []
+
+def register_cameras(gate_camera, bay_cameras):
+    """Called from run_camera_demo once cameras are initialised."""
+    global _gate_camera, _bay_cameras
+    _gate_camera = gate_camera
+    _bay_cameras  = bay_cameras or []
+    logger.info(f"Cameras registered – gate: {gate_camera is not None}, "
+                f"bay: {len(_bay_cameras)}")
+
+# ── MJPEG helpers ─────────────────────────────────────────────────────────────
+_STREAM_W   = 320
+_STREAM_H   = 240
+_STREAM_FPS = 8
+_STREAM_Q   = 60   # JPEG quality 0-100
+
+def _make_blank():
+    img = np.zeros((_STREAM_H, _STREAM_W, 3), dtype=np.uint8)
+    cv2.putText(img, 'No feed', (_STREAM_W // 2 - 40, _STREAM_H // 2),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (70, 70, 70), 1)
+    return img
+
+_BLANK_FRAME = None
+
+def _mjpeg_stream(get_frame_fn):
+    """Generator: yields MJPEG boundary chunks at _STREAM_FPS."""
+    global _BLANK_FRAME
+    if _BLANK_FRAME is None:
+        _BLANK_FRAME = _make_blank()
+
+    interval = 1.0 / _STREAM_FPS
+    enc_params = [cv2.IMWRITE_JPEG_QUALITY, _STREAM_Q]
+
+    while True:
+        t0 = time.time()
+        try:
+            frame = get_frame_fn()
+            if frame is None:
+                frame = _BLANK_FRAME
+            else:
+                frame = cv2.resize(frame, (_STREAM_W, _STREAM_H))
+            _, buf = cv2.imencode('.jpg', frame, enc_params)
+            jpg = buf.tobytes()
+        except Exception:
+            _, buf = cv2.imencode('.jpg', _BLANK_FRAME, enc_params)
+            jpg = buf.tobytes()
+
+        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpg + b'\r\n')
+
+        elapsed = time.time() - t0
+        rem = interval - elapsed
+        if rem > 0:
+            time.sleep(rem)
 
 
 def init_system(external_db=None, external_bus=None, priority_queue=None):
@@ -164,6 +223,35 @@ def kiosk():
 @app.route('/search')
 def search():
     return render_template('camera_search.html')
+
+
+@app.route('/cameras')
+def cameras_page():
+    cams = []
+    if _gate_camera is not None:
+        cams.append({'label': 'Gate Camera – ALPR', 'url': '/video/gate'})
+    for svc in _bay_cameras:
+        cams.append({'label': svc.label, 'url': f'/video/bay/{svc.camera_index}'})
+    return render_template('camera_feed.html', cameras=cams)
+
+
+@app.route('/video/gate')
+def video_gate():
+    def _get():
+        return _gate_camera.get_latest_frame() if _gate_camera else None
+    return Response(_mjpeg_stream(_get),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.route('/video/bay/<int:cam_idx>')
+def video_bay(cam_idx):
+    def _get():
+        for svc in _bay_cameras:
+            if svc.camera_index == cam_idx:
+                return svc.get_latest_frame()
+        return None
+    return Response(_mjpeg_stream(_get),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 @app.route('/api/bays')

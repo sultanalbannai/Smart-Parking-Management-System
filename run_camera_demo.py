@@ -38,6 +38,7 @@ from src.services.confirmation import ConfirmationService
 
 from camera_alpr_service import CameraALPRService
 from bay_camera_service import load_bay_cameras
+import web_server_camera as _web
 
 import os
 import cv2
@@ -405,6 +406,10 @@ def main():
         return
 
     print("✅ Gate camera ready\n")
+
+    # Register cameras with web server so /cameras and /video/* routes work
+    _web.register_cameras(gate_cam, bay_cam_services)
+    print("📹 Camera streams : http://127.0.0.1:5000/cameras\n")
     print("="*60)
     print(" HOW TO USE ".center(60))
     print("="*60)

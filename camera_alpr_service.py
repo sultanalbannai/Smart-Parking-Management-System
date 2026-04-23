@@ -127,6 +127,11 @@ class CameraALPRService:
         self.camera          = None
         self.is_camera_ready = False
 
+        # Latest frame buffer – read by the MJPEG streaming endpoint
+        import threading as _t
+        self._latest_frame = None
+        self._frame_lock   = _t.Lock()
+
         logger.info("Loading EasyOCR model (first run may take a minute)...")
         _use_gpu = _cuda_available()
         logger.info(f"EasyOCR GPU: {'enabled' if _use_gpu else 'disabled (no CUDA)'}")
@@ -169,7 +174,15 @@ class CameraALPRService:
         if not self.is_camera_ready:
             return None
         ret, frame = self.camera.read()
+        if ret and frame is not None:
+            with self._frame_lock:
+                self._latest_frame = frame
         return frame if ret else None
+
+    def get_latest_frame(self) -> Optional[np.ndarray]:
+        """Return a copy of the most recent captured frame (thread-safe)."""
+        with self._frame_lock:
+            return self._latest_frame.copy() if self._latest_frame is not None else None
 
     # ── OCR ───────────────────────────────────────────────────────────────────
 

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SPMS – Live Cameras</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/production.css') }}">
+    <style>
+        .cameras-page { padding: 24px; }
+        .cameras-page h2 {
+            color: var(--text-1);
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .cameras-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .camera-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            width: 360px;
+            flex-shrink: 0;
+        }
+        .camera-card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border);
+        }
+        .camera-live-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse-dot 2s infinite;
+            flex-shrink: 0;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.35; }
+        }
+        .camera-label {
+            color: var(--text-2);
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        .camera-img-wrap {
+            background: #000;
+            line-height: 0;
+        }
+        .camera-img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .no-cameras {
+            color: var(--text-3);
+            padding: 48px;
+            text-align: center;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">P</span>
+                <h1>SPMS</h1>
+            </div>
+            <nav class="header-nav">
+                <a href="/">Dashboard</a>
+                <a href="/kiosk">Kiosk</a>
+                <a href="/cameras" class="active">Cameras</a>
+                <a href="/search">Find My Car</a>
+            </nav>
+            <div class="header-right">
+                <div class="time" id="currentTime">--:--:--</div>
+                <div class="status online">
+                    <span class="dot"></span>
+                    <span>LIVE</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="cameras-page">
+            <h2>
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M23 7l-7 5 7 5V7z"/>
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                </svg>
+                Live Camera Feeds
+                <span style="color:var(--text-3);font-size:0.75rem;font-weight:400;margin-left:6px;">
+                    320×240 · 8 fps
+                </span>
+            </h2>
+
+            {% if cameras %}
+            <div class="cameras-grid">
+                {% for cam in cameras %}
+                <div class="camera-card">
+                    <div class="camera-card-header">
+                        <span class="camera-live-dot"></span>
+                        <span class="camera-label">{{ cam.label }}</span>
+                    </div>
+                    <div class="camera-img-wrap">
+                        <img src="{{ cam.url }}"
+                             class="camera-img"
+                             alt="{{ cam.label }}"
+                             onerror="this.src='/static/img/no-feed.png'">
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="no-cameras">
+                No cameras registered yet — start the system first.
+            </div>
+            {% endif %}
+        </div>
+
+    </div>
+
+    <script>
+        function updateClock() {
+            const el = document.getElementById('currentTime');
+            if (el) el.textContent = new Date().toLocaleTimeString([], {
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+        }
+        updateClock();
+        setInterval(updateClock, 1000);
+    </script>
+</body>
+</html>
