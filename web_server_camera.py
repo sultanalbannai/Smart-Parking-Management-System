@@ -23,6 +23,28 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'spms-camera-demo-secret'
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
+
+@app.teardown_appcontext
+def _release_db_session(exc=None):
+    """
+    After each Flask request, remove the per-thread session from the
+    scoped_session registry. If the request raised, roll back first so the
+    session isn't left in a 'prepared' state that poisons future queries.
+    """
+    try:
+        if db_session is None:
+            return
+        if exc is not None:
+            try:
+                db_session.rollback()
+            except Exception:
+                pass
+        # scoped_session has .remove(); plain Session does not.
+        if hasattr(db_session, 'remove'):
+            db_session.remove()
+    except Exception:
+        pass
+
 db_session: Session = None
 message_bus = None
 _priority_queue = None          # shared queue – filled when kiosk sends priority_selected

@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Optional
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Enum as SQLEnum, ForeignKey, Boolean
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker
+from sqlalchemy.orm import relationship, sessionmaker, scoped_session
 
 Base = declarative_base()
 
@@ -220,8 +220,16 @@ class Database:
         Args:
             db_path: SQLAlchemy database URL
         """
-        self.engine = create_engine(db_path, echo=False)
-        self.SessionLocal = sessionmaker(bind=self.engine)
+        # SQLite needs check_same_thread=False so the engine can be shared
+        # across the bay-camera worker threads, Flask request threads, and the
+        # main loop. Concurrency is handled by the scoped_session below: each
+        # thread gets its own Session, isolating transaction state.
+        connect_args = {'check_same_thread': False} if db_path.startswith('sqlite') else {}
+        self.engine = create_engine(db_path, echo=False, connect_args=connect_args)
+        self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
+        # scoped_session: calling it returns a thread-local Session. A failure
+        # in one thread no longer poisons sessions used by others.
+        self.Session = scoped_session(self.SessionLocal)
         
     def create_tables(self):
         """Create all tables in the database"""
@@ -232,5 +240,10 @@ class Database:
         Base.metadata.drop_all(self.engine)
         
     def get_session(self):
-        """Get a new database session"""
-        return self.SessionLocal()
+        """
+        Return the thread-local scoped session. Calling .query/.commit/etc.
+        on this proxy automatically dispatches to a per-thread Session,
+        so each Flask request and each background thread runs an isolated
+        transaction. Errors in one thread do not poison the others.
+        """
+        return self.Session

@@ -400,6 +400,10 @@ class BayCameraService:
                 self.db.commit()
         except Exception as e:
             logger.error(f"[{self.label}] Failed to clear plate from DB: {e}")
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
 
     def _read_plate_crop(self, frame, roi: Tuple[int, int, int, int],
                          use_upscale: bool = True) -> Optional[str]:
@@ -457,6 +461,10 @@ class BayCameraService:
                 logger.info(f"[{self.label}] Saved plate {plate} → {bay_id}")
         except Exception as e:
             logger.error(f"[{self.label}] Failed to save plate to DB: {e}")
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
 
         self.bus.publish("parking/bays/plate_logged", {
             "bayId":  bay_id,
