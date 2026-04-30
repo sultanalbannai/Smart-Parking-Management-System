@@ -305,6 +305,28 @@ def get_bay(bay_id):
     })
 
 
+@app.route('/api/bay/<bay_id>/read_plate', methods=['POST'])
+def read_bay_plate(bay_id):
+    """On-demand plate scan for a specific bay – fired by dashboard button."""
+    if not _bay_cameras:
+        return jsonify({'ok': False, 'error': 'No bay cameras registered'}), 503
+
+    target = next((c for c in _bay_cameras if bay_id in c.bay_ids), None)
+    if target is None:
+        return jsonify({'ok': False, 'error': f'No camera watches bay {bay_id}'}), 404
+
+    try:
+        plate = target.read_plate_now(bay_id)
+    except Exception as exc:
+        logger.error(f"read_plate_now failed for {bay_id}: {exc}")
+        return jsonify({'ok': False, 'error': str(exc)}), 500
+
+    if plate:
+        return jsonify({'ok': True, 'plate': plate, 'bayId': bay_id})
+    return jsonify({'ok': False, 'plate': None, 'bayId': bay_id,
+                    'error': 'No plate detected'}), 200
+
+
 @app.route('/api/find_plate/<plate>')
 def find_plate(plate):
     """Search which bay a given plate number is currently parked in."""

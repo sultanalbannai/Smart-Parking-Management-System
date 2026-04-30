@@ -182,6 +182,28 @@ class BayCameraService:
         """Register a one-shot callback fired the next time bay_id becomes occupied."""
         self._occupied_callbacks[bay_id] = callback
 
+    def read_plate_now(self, bay_id: str) -> Optional[str]:
+        """
+        On-demand plate read for a specific bay – called by the dashboard
+        "Scan plate now" button. Captures the latest frame, crops the bay's ROI,
+        runs EasyOCR, and persists the plate. Returns the detected plate or None.
+        """
+        if bay_id not in self.bay_ids:
+            logger.warning(f"[{self.label}] read_plate_now: {bay_id} not watched here")
+            return None
+        roi = self.rois.get(bay_id)
+        if roi is None:
+            logger.warning(f"[{self.label}] read_plate_now: no ROI defined for {bay_id}")
+            return None
+        frame = self.get_latest_frame()
+        if frame is None:
+            logger.warning(f"[{self.label}] read_plate_now: no frame available")
+            return None
+        plate = self._read_plate_crop(frame, roi)
+        if plate:
+            self._save_plate(bay_id, plate)
+        return plate
+
     # ── Internal loop ─────────────────────────────────────────────────────────
 
     def _run(self):

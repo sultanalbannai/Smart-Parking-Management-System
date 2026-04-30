@@ -482,7 +482,59 @@ function fillBayModal(data) {
         plateEl.textContent = data.state === 'AVAILABLE' ? 'Bay is empty' : 'No plate recorded';
         plateEl.classList.add('empty');
     }
+
+    // Hide stale scan messages from a previous bay
+    const msg = document.getElementById('bmScanMsg');
+    if (msg) { msg.style.display = 'none'; msg.textContent = ''; }
 }
+
+// \u2500\u2500 On-demand "Scan plate now" button \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('bmScanPlate');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+        const bayId = document.getElementById('bmBayId').textContent.trim();
+        if (!bayId || bayId === '--') return;
+        const msg = document.getElementById('bmScanMsg');
+        btn.disabled = true;
+        const originalLabel = btn.textContent;
+        btn.textContent = 'Scanning\u2026';
+        if (msg) { msg.style.display = 'none'; msg.textContent = ''; }
+
+        fetch(`/api/bay/${encodeURIComponent(bayId)}/read_plate`, { method: 'POST' })
+            .then(r => r.json().then(j => ({ status: r.status, body: j })))
+            .then(({ status, body }) => {
+                if (msg) msg.style.display = 'block';
+                if (body.ok && body.plate) {
+                    if (msg) {
+                        msg.textContent = `Plate detected: ${body.plate}`;
+                        msg.style.color = '#16a34a';
+                    }
+                    const plateEl = document.getElementById('bmPlate');
+                    plateEl.textContent = body.plate;
+                    plateEl.classList.remove('empty');
+                    if (baysData[bayId]) baysData[bayId].plate = body.plate;
+                } else {
+                    if (msg) {
+                        msg.textContent = body.error || 'No plate detected';
+                        msg.style.color = '#dc2626';
+                    }
+                }
+            })
+            .catch(err => {
+                if (msg) {
+                    msg.style.display = 'block';
+                    msg.textContent = 'Scan failed: ' + err;
+                    msg.style.color = '#dc2626';
+                }
+            })
+            .finally(() => {
+                btn.disabled = false;
+                btn.textContent = originalLabel;
+            });
+    });
+});
 
 // ── Alerts Panel ─────────────────────────────────────────────────────────────
 
