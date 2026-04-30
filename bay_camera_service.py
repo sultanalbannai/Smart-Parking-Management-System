@@ -187,6 +187,17 @@ class BayCameraService:
         """Register a one-shot callback fired the next time bay_id becomes occupied."""
         self._occupied_callbacks[bay_id] = callback
 
+    def update_roi(self, bay_id: str, roi: Tuple[int, int, int, int]) -> None:
+        """
+        Hot-update a bay ROI from the calibration page – takes effect on the
+        next frame; no restart required.
+        """
+        if bay_id not in self.bay_ids:
+            logger.warning(f"[{self.label}] update_roi: {bay_id} not watched here")
+            return
+        self.rois[bay_id] = tuple(int(v) for v in roi)
+        logger.info(f"[{self.label}] ROI updated for {bay_id}: {self.rois[bay_id]}")
+
     def read_plate_now(self, bay_id: str) -> Optional[str]:
         """
         On-demand plate read for a specific bay – called by the dashboard

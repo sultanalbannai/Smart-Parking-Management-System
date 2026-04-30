@@ -257,6 +257,102 @@ def cameras_page():
     return render_template('camera_feed.html', cameras=cams)
 
 
+@app.route('/calibrate')
+def calibrate_page():
+    """ROI calibration UI – click-and-drag a rectangle on each bay camera."""
+    cams = []
+    for svc in _bay_cameras:
+        cams.append({
+            'camera_index': svc.camera_index,
+            'label':        svc.label,
+            'bays':         list(svc.bay_ids),
+            'stream_url':   f'/video/bay/{svc.camera_index}',
+        })
+    return render_template('calibrate.html', cameras=cams)
+
+
+@app.route('/api/rois', methods=['GET'])
+def get_rois():
+    """Return the live in-memory ROI map plus the capture frame dimensions."""
+    try:
+        from bay_camera_service import CAPTURE_WIDTH, CAPTURE_HEIGHT
+    except Exception:
+        CAPTURE_WIDTH, CAPTURE_HEIGHT = 640, 480
+    cams = []
+    for svc in _bay_cameras:
+        cams.append({
+            'camera_index': svc.camera_index,
+            'label':        svc.label,
+            'bays':         [
+                {'bay_id': bid, 'roi': list(svc.rois[bid])}
+                for bid in svc.bay_ids if bid in svc.rois
+            ],
+        })
+    return jsonify({
+        'frame_width':  CAPTURE_WIDTH,
+        'frame_height': CAPTURE_HEIGHT,
+        'cameras':      cams,
+    })
+
+
+@app.route('/api/rois', methods=['POST'])
+def save_roi():
+    """
+    Save a single bay's ROI – called from the calibration page.
+    Body: { camera_index, bay_id, roi: [x1,y1,x2,y2] }   (capture-frame pixels)
+    Updates config/bay_rois.yaml AND hot-reloads the running camera service.
+    """
+    import yaml, os
+    data = request.get_json(silent=True) or {}
+    cam_idx = data.get('camera_index')
+    bay_id  = data.get('bay_id')
+    roi     = data.get('roi')
+    if cam_idx is None or not bay_id or not roi or len(roi) != 4:
+        return jsonify({'ok': False, 'error': 'Missing camera_index/bay_id/roi'}), 400
+
+    # 1. Hot-update the running BayCameraService
+    target = next((c for c in _bay_cameras if c.camera_index == cam_idx), None)
+    if target is None:
+        return jsonify({'ok': False, 'error': f'No camera with index {cam_idx}'}), 404
+    if bay_id not in target.bay_ids:
+        return jsonify({'ok': False,
+                        'error': f'Camera {cam_idx} does not watch {bay_id}'}), 400
+    try:
+        target.update_roi(bay_id, roi)
+    except Exception as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 500
+
+    # 2. Persist to disk
+    rois_path = os.path.join('config', 'bay_rois.yaml')
+    try:
+        with open(rois_path, encoding='utf-8') as f:
+            cfg = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        cfg = {}
+    cfg.setdefault('cameras', [])
+
+    cam_entry = next((c for c in cfg['cameras']
+                      if c.get('camera_index') == cam_idx), None)
+    if cam_entry is None:
+        cam_entry = {'camera_index': cam_idx, 'bays': []}
+        cfg['cameras'].append(cam_entry)
+    cam_entry.setdefault('bays', [])
+
+    bay_entry = next((b for b in cam_entry['bays']
+                      if b.get('bay_id') == bay_id), None)
+    if bay_entry is None:
+        bay_entry = {'bay_id': bay_id}
+        cam_entry['bays'].append(bay_entry)
+    bay_entry['roi'] = [int(v) for v in roi]
+
+    os.makedirs(os.path.dirname(rois_path), exist_ok=True)
+    with open(rois_path, 'w', encoding='utf-8') as f:
+        yaml.safe_dump(cfg, f, sort_keys=False)
+
+    return jsonify({'ok': True, 'camera_index': cam_idx,
+                    'bay_id': bay_id, 'roi': bay_entry['roi']})
+
+
 @app.route('/video/gate')
 def video_gate():
     def _get():

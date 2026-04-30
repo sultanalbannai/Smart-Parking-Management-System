@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>SPMS – ROI Calibration</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/production.css') }}">
+    <style>
+        .cal-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+            gap: 18px;
+            padding: 18px;
+        }
+        .cal-card {
+            background: var(--bg-card, #fff);
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .cal-card h3 { margin: 0; font-size: 1rem; }
+        .cal-stage {
+            position: relative;
+            width: 100%;
+            background: #000;
+            line-height: 0;
+            border-radius: 4px;
+            overflow: hidden;
+            cursor: crosshair;
+            user-select: none;
+        }
+        .cal-stage img { width: 100%; display: block; }
+        .cal-stage canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .cal-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .cal-controls select,
+        .cal-controls button {
+            font-size: 0.85rem;
+            padding: 6px 10px;
+            border-radius: 4px;
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            cursor: pointer;
+        }
+        .cal-controls button.primary {
+            background: #2563eb;
+            color: #fff;
+            border-color: #2563eb;
+        }
+        .cal-controls button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .cal-status {
+            font-size: 0.78rem;
+            color: var(--text-3, #475569);
+            min-height: 18px;
+        }
+        .cal-coords {
+            font-family: monospace;
+            font-size: 0.78rem;
+            color: var(--text-3, #475569);
+        }
+        .cal-help {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            color: #1e3a8a;
+            padding: 10px 14px;
+            font-size: 0.85rem;
+            border-radius: 6px;
+            margin: 12px 18px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">P</span>
+                <h1>SPMS – Calibration</h1>
+            </div>
+            <nav class="header-nav">
+                <a href="/">Dashboard</a>
+                <a href="/cameras">Cameras</a>
+                <a href="/calibrate" class="active">Calibrate</a>
+            </nav>
+        </header>
+
+        <div class="cal-help">
+            Click and drag on a bay camera feed to draw a rectangle around the
+            license-plate area. Pick the bay this rectangle belongs to and press
+            <strong>Save ROI</strong>. Saved ROIs take effect immediately —
+            no restart required. The existing ROI is shown in green.
+        </div>
+
+        <div class="cal-grid" id="calGrid">
+            {% for cam in cameras %}
+            <div class="cal-card"
+                 data-camera-index="{{ cam.camera_index }}"
+                 data-bays='{{ cam.bays|tojson }}'>
+                <h3>{{ cam.label }} <span style="color:#94a3b8;font-weight:400;">(idx {{ cam.camera_index }})</span></h3>
+                <div class="cal-stage">
+                    <img src="{{ cam.stream_url }}" alt="bay cam">
+                    <canvas></canvas>
+                </div>
+                <div class="cal-controls">
+                    <label>Bay
+                        <select class="bay-select">
+                            {% for b in cam.bays %}
+                            <option value="{{ b }}">{{ b }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <button class="btn-clear">Clear</button>
+                    <button class="btn-save primary" disabled>Save ROI</button>
+                </div>
+                <div class="cal-coords"></div>
+                <div class="cal-status"></div>
+            </div>
+            {% endfor %}
+            {% if not cameras %}
+            <div style="padding:40px;text-align:center;color:#64748b;">
+                No bay cameras registered. Start <code>run_camera_demo.py</code> first.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/calibrate.js') }}"></script>
+</body>
+</html>
