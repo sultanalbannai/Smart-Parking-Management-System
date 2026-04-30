@@ -61,11 +61,22 @@ logger = logging.getLogger(__name__)
 
 # ── Tuning ────────────────────────────────────────────────────────────────────
 YOLO_CONF          = 0.45        # minimum YOLO detection confidence
+YOLO_IMGSZ         = 320         # YOLO input size (was default 640) – ~4× faster
 VEHICLE_CLASSES    = {2, 5, 7}  # COCO: car=2, bus=5, truck=7
 DEBOUNCE_COUNT     = 4           # consecutive same-state frames to commit
 MIN_CONF           = 0.30        # minimum EasyOCR confidence
 OCR_RETRY_FRAMES   = 150         # keep retrying OCR for this many frames (~5 s)
 OCR_RETRY_INTERVAL = 15          # attempt OCR every N frames during retry window
+
+# Capture settings – low res / low FPS to minimise CPU on Jetson
+CAPTURE_WIDTH      = 640
+CAPTURE_HEIGHT     = 480
+CAPTURE_FPS        = 10
+
+# Frame-skip & motion-gating: only run YOLO when something might have changed
+YOLO_INTERVAL      = 5           # run YOLO at most every Nth frame
+MOTION_GATE_RATIO  = 0.02        # skip YOLO entirely if < 2% ROI pixels changed
+                                  # (set to 0 to disable motion-gating)
 
 # Background-subtraction fallback (catches toy/model cars YOLO misses)
 BG_FG_THRESHOLD    = 0.10        # fraction of ROI pixels that must change
@@ -179,12 +190,15 @@ class BayCameraService:
             logger.error(f"[{self.label}] Cannot open camera {self.camera_index}")
             return
 
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        cap.set(cv2.CAP_PROP_FPS, 30)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAPTURE_WIDTH)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAPTURE_HEIGHT)
+        cap.set(cv2.CAP_PROP_FPS, CAPTURE_FPS)
 
         frame_count = 0
-        logger.info(f"[{self.label}] Camera {self.camera_index} open – monitoring …")
+        last_yolo_results = None
+        logger.info(f"[{self.label}] Camera {self.camera_index} open "
+                    f"({CAPTURE_WIDTH}x{CAPTURE_HEIGHT}@{CAPTURE_FPS}fps, "
+                    f"YOLO every {YOLO_INTERVAL} frames, imgsz={YOLO_IMGSZ}) – monitoring …")
 
         # Capture empty-scene reference for background-diff fallback
         for _ in range(20):
@@ -211,7 +225,39 @@ class BayCameraService:
             with self._frame_lock:
                 self._latest_frame = frame.copy()
 
-            results = self._yolo(frame, verbose=False, conf=YOLO_CONF)
+            # ── Pre-compute per-ROI bg-diff once (cheap, reused for motion-gate) ──
+            roi_bg_info = {}   # bay_id -> (bg_hit, change_ratio)
+            any_motion = False
+            for bay_id in self.bay_ids:
+                roi   = self.rois.get(bay_id)
+                ref_g = ref_grays.get(bay_id)
+                if roi is None or ref_g is None:
+                    roi_bg_info[bay_id] = (False, 0.0)
+                    continue
+                x1, y1, x2, y2 = roi
+                curr_g = cv2.GaussianBlur(
+                    cv2.cvtColor(frame[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY), (5, 5), 0)
+                diff   = cv2.absdiff(ref_g, curr_g)
+                _, thr = cv2.threshold(diff, BG_PIXEL_THRESH, 255, cv2.THRESH_BINARY)
+                roi_area = max(1, (x2 - x1) * (y2 - y1))
+                ratio = np.count_nonzero(thr) / roi_area
+                bg_hit = ratio >= BG_FG_THRESHOLD
+                roi_bg_info[bay_id] = (bg_hit, ratio)
+                if ratio >= MOTION_GATE_RATIO:
+                    any_motion = True
+
+            # ── Run YOLO only on interval AND when something is changing ──────
+            # Always run YOLO when no prior results exist, or when a bay is
+            # currently occupied (need to detect departure even with little motion).
+            need_yolo = (
+                last_yolo_results is None
+                or (frame_count % YOLO_INTERVAL == 0 and (any_motion or any(self._current_state.values())))
+            )
+            if need_yolo:
+                last_yolo_results = self._yolo(
+                    frame, verbose=False, conf=YOLO_CONF, imgsz=YOLO_IMGSZ
+                )
+            results = last_yolo_results
 
             for bay_id in self.bay_ids:
                 roi = self.rois.get(bay_id)
@@ -219,18 +265,7 @@ class BayCameraService:
                     continue
 
                 yolo_hit, conf = _vehicle_in_roi(results, roi)
-
-                # Background-diff fallback: catches toy/model cars YOLO misses
-                bg_hit = False
-                ref_g  = ref_grays.get(bay_id)
-                if ref_g is not None:
-                    x1, y1, x2, y2 = roi
-                    curr_g = cv2.GaussianBlur(
-                        cv2.cvtColor(frame[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY), (5, 5), 0)
-                    diff   = cv2.absdiff(ref_g, curr_g)
-                    _, thr = cv2.threshold(diff, BG_PIXEL_THRESH, 255, cv2.THRESH_BINARY)
-                    roi_area = max(1, (x2 - x1) * (y2 - y1))
-                    bg_hit = np.count_nonzero(thr) / roi_area >= BG_FG_THRESHOLD
+                bg_hit, _ratio = roi_bg_info.get(bay_id, (False, 0.0))
 
                 occupied = yolo_hit or bg_hit
                 if occupied and not conf:
@@ -357,13 +392,13 @@ class BayCameraService:
             kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
             gray   = cv2.filter2D(gray, -1, kernel)
 
-            # Run OCR on original size AND 2× upscale for better small-text accuracy
+            # Single-pass OCR – upscaling doubled CPU cost for marginal gain.
+            # The retry loop in _run() gives multiple natural attempts.
             best_text, best_conf = None, 0.0
-            for img in [gray, cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)]:
-                for (_bbox, text, c) in self._ocr.readtext(img):
-                    t = _normalize(text)
-                    if 2 <= len(t) <= 10 and c >= MIN_CONF and c > best_conf:
-                        best_text, best_conf = t, c
+            for (_bbox, text, c) in self._ocr.readtext(gray):
+                t = _normalize(text)
+                if 2 <= len(t) <= 10 and c >= MIN_CONF and c > best_conf:
+                    best_text, best_conf = t, c
 
             if best_text:
                 logger.debug(f"[{self.label}] OCR result: {best_text}  conf={best_conf:.2f}")

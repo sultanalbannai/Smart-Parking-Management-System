@@ -46,9 +46,17 @@ import numpy as np
 import yaml
 
 # ── Display helpers (self-disabling on first error) ───────────────────────────
+def _headless_forced() -> bool:
+    """SPMS_HEADLESS=1 forces all cv2.imshow windows off (production / kiosk)."""
+    return os.environ.get('SPMS_HEADLESS', '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
 _HAS_DISPLAY: bool = (
-    os.name == 'nt'
-    or bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+    not _headless_forced()
+    and (
+        os.name == 'nt'
+        or bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+    )
 )
 _display_warned = False
 

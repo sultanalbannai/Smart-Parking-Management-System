@@ -35,9 +35,17 @@ logger = logging.getLogger(__name__)
 # Start optimistic: show windows if DISPLAY is set.  The first cv2.imshow()
 # that raises (e.g. SSH session where DISPLAY=:0 is set but not reachable)
 # flips _HAS_DISPLAY to False and all subsequent calls become no-ops.
+def _headless_forced() -> bool:
+    """SPMS_HEADLESS=1 forces all cv2.imshow windows off (production / kiosk)."""
+    return os.environ.get('SPMS_HEADLESS', '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
 _HAS_DISPLAY: bool = (
-    os.name == 'nt'
-    or bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+    not _headless_forced()
+    and (
+        os.name == 'nt'
+        or bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
+    )
 )
 _display_warned = False
 
@@ -147,9 +155,12 @@ class CameraALPRService:
                 logger.error(f"Failed to open camera {self.camera_index}")
                 return False
 
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            self.camera.set(cv2.CAP_PROP_FPS, 30)
+            # Low-res / low-FPS capture to minimise CPU on Jetson.
+            # Plate OCR is run on a single settled snapshot – high FPS/resolution
+            # for the live loop just burns USB bandwidth and decode cycles.
+            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
+            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.camera.set(cv2.CAP_PROP_FPS, 15)
 
             ret, _ = self.camera.read()
             if not ret:
