@@ -187,14 +187,29 @@ class BayCameraService:
         """Register a one-shot callback fired the next time bay_id becomes occupied."""
         self._occupied_callbacks[bay_id] = callback
 
+    def add_bay(self, bay_id: str) -> None:
+        """
+        Start watching a new bay on this camera at runtime. Idempotent –
+        does nothing if the bay is already in this camera's watch list.
+        """
+        if bay_id in self.bay_ids:
+            return
+        self.bay_ids.append(bay_id)
+        self._occ_streak[bay_id]    = 0
+        self._free_streak[bay_id]   = 0
+        self._current_state[bay_id] = False
+        self._ocr_retry[bay_id]     = 0
+        self._plate_known[bay_id]   = False
+        logger.info(f"[{self.label}] Now also watching bay: {bay_id}")
+
     def update_roi(self, bay_id: str, roi: Tuple[int, int, int, int]) -> None:
         """
         Hot-update a bay ROI from the calibration page – takes effect on the
-        next frame; no restart required.
+        next frame; no restart required. Auto-adds the bay to the watch list
+        if it wasn't previously assigned to this camera.
         """
         if bay_id not in self.bay_ids:
-            logger.warning(f"[{self.label}] update_roi: {bay_id} not watched here")
-            return
+            self.add_bay(bay_id)
         self.rois[bay_id] = tuple(int(v) for v in roi)
         logger.info(f"[{self.label}] ROI updated for {bay_id}: {self.rois[bay_id]}")
 

@@ -268,7 +268,15 @@ def calibrate_page():
             'bays':         list(svc.bay_ids),
             'stream_url':   f'/video/bay/{svc.camera_index}',
         })
-    return render_template('calibrate.html', cameras=cams)
+    # All bays in the system – used to populate the calibration dropdown so
+    # any bay can be assigned to any camera (not just pre-configured ones).
+    all_bays = []
+    if db_session is not None:
+        try:
+            all_bays = sorted(b.id for b in db_session.query(Bay).all())
+        except Exception:
+            pass
+    return render_template('calibrate.html', cameras=cams, all_bays=all_bays)
 
 
 @app.route('/api/rois', methods=['GET'])
@@ -314,13 +322,33 @@ def save_roi():
     target = next((c for c in _bay_cameras if c.camera_index == cam_idx), None)
     if target is None:
         return jsonify({'ok': False, 'error': f'No camera with index {cam_idx}'}), 404
-    if bay_id not in target.bay_ids:
-        return jsonify({'ok': False,
-                        'error': f'Camera {cam_idx} does not watch {bay_id}'}), 400
+    bay_added = bay_id not in target.bay_ids
     try:
-        target.update_roi(bay_id, roi)
+        target.update_roi(bay_id, roi)   # auto-adds the bay if new
     except Exception as exc:
         return jsonify({'ok': False, 'error': str(exc)}), 500
+
+    # 1b. If this is a new bay-camera mapping, also persist it to
+    # camera_demo_config.yaml so the assignment survives a restart.
+    if bay_added:
+        cfg_path = os.path.join('config', 'camera_demo_config.yaml')
+        try:
+            with open(cfg_path, encoding='utf-8') as f:
+                main_cfg = yaml.safe_load(f) or {}
+            cams = main_cfg.setdefault('bay_cameras', [])
+            entry = next((c for c in cams if c.get('camera_index') == cam_idx), None)
+            if entry is None:
+                entry = {'camera_index': cam_idx,
+                         'label': target.label,
+                         'bays': []}
+                cams.append(entry)
+            entry.setdefault('bays', [])
+            if bay_id not in entry['bays']:
+                entry['bays'].append(bay_id)
+            with open(cfg_path, 'w', encoding='utf-8') as f:
+                yaml.safe_dump(main_cfg, f, sort_keys=False)
+        except Exception as exc:
+            logger.warning(f"Could not persist bay assignment to config: {exc}")
 
     # 2. Persist to disk
     rois_path = os.path.join('config', 'bay_rois.yaml')

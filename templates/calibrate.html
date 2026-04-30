@@ -116,9 +116,21 @@
                 <div class="cal-controls">
                     <label>Bay
                         <select class="bay-select">
-                            {% for b in cam.bays %}
-                            <option value="{{ b }}">{{ b }}</option>
-                            {% endfor %}
+                            {% if cam.bays %}
+                            <optgroup label="Currently watched">
+                                {% for b in cam.bays %}
+                                <option value="{{ b }}">{{ b }}</option>
+                                {% endfor %}
+                            </optgroup>
+                            {% endif %}
+                            {% set other = all_bays | reject('in', cam.bays) | list %}
+                            {% if other %}
+                            <optgroup label="Other bays (will be added)">
+                                {% for b in other %}
+                                <option value="{{ b }}">{{ b }}</option>
+                                {% endfor %}
+                            </optgroup>
+                            {% endif %}
                         </select>
                     </label>
                     <button class="btn-clear">Clear</button>
