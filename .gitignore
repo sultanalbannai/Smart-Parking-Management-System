@@ -1,0 +1,27 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtualenvs
+.venv/
+venv/
+
+# Claude Code worktrees
+.claude/
+
+# Model weights / inference artifacts (downloaded on demand)
+yolov8n.pt
+yolov8n.onnx
+yolov8n.engine
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Local backups
+*.bak
+*.old
+data/*.db.old
