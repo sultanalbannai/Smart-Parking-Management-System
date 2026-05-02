@@ -69,11 +69,14 @@ async function loadAssignmentPanel() {
         for (const c of avail) {
             const wrap = document.createElement('div');
             wrap.className = 'cam-thumb';
+            let badge = '';
+            if (c.in_use) badge = ' (in use)';
+            else if (c.probe_ok === false) badge = ' (busy?)';
             wrap.innerHTML = `
                 <img src="/api/cameras/${c.index}/snapshot.jpg?t=${ts}"
                      alt="cam ${c.index}"
-                     onerror="this.style.background='#1f2937'">
-                <div>idx ${c.index}${c.in_use ? ' (in use)' : ''}</div>
+                     onerror="this.style.background='#1f2937';this.alt='no preview'">
+                <div>idx ${c.index}${badge}</div>
             `;
             detectedEl.appendChild(wrap);
         }

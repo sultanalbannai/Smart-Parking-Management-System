@@ -270,20 +270,22 @@ def cameras_page():
 
 def _enumerate_cameras():
     """
-    Enumerate Linux /dev/videoN devices (or 0..7 on Windows) and return a list
-    of indexes that can actually be opened and produce a frame. Each index
-    that is currently in use by a running service is also reported as ``in_use``.
+    Enumerate cameras and return the indexes that should appear in the
+    calibration dropdowns.
+
+    Strategy:
+      1. On Linux, prefer parsing ``v4l2-ctl --list-devices``: each USB
+         camera shows a *group* with several /dev/videoN entries; only the
+         FIRST one in each group is the actual capture stream (the others
+         are metadata streams that won't return frames). This avoids the
+         odd-numbered "ghost" indexes and is robust against probe failures
+         right after a hot-restart.
+      2. Fallback: glob /dev/video* and probe each.
+      3. Indexes currently held by a running service are reported as
+         ``in_use=True`` without re-probing (USB drivers don't allow two
+         opens at once and the probe would lie).
     """
-    import os, glob
-    candidates = []
-    if os.name == 'nt':
-        candidates = list(range(8))
-    else:
-        for path in sorted(glob.glob('/dev/video*')):
-            try:
-                candidates.append(int(path.replace('/dev/video', '')))
-            except ValueError:
-                pass
+    import os, glob, subprocess
 
     busy = set()
     if _gate_camera is not None and _gate_camera.is_camera_ready:
@@ -291,17 +293,64 @@ def _enumerate_cameras():
     for svc in _bay_cameras:
         busy.add(svc.camera_index)
 
+    primary = None        # list[int] – preferred indexes when v4l2-ctl works
+
+    if os.name != 'nt':
+        try:
+            out = subprocess.check_output(
+                ['v4l2-ctl', '--list-devices'],
+                stderr=subprocess.DEVNULL, timeout=3
+            ).decode('utf-8', errors='ignore')
+            primary = []
+            current_group_is_usb = False
+            current_group_taken  = False
+            for line in out.splitlines():
+                if line and not line.startswith('\t'):
+                    # New group header (e.g. "USB Camera (usb-...):" or
+                    # "NVIDIA Tegra Video Input Device (...):")
+                    current_group_is_usb = ('usb' in line.lower()
+                                             or 'camera' in line.lower())
+                    current_group_taken  = False
+                elif line.startswith('\t/dev/video') and current_group_is_usb \
+                        and not current_group_taken:
+                    try:
+                        idx = int(line.strip().replace('/dev/video', ''))
+                        primary.append(idx)
+                        current_group_taken = True   # only first per group
+                    except ValueError:
+                        pass
+        except (FileNotFoundError, subprocess.SubprocessError, OSError):
+            primary = None
+
+    if primary is None:
+        # Fallback: enumerate by file or numeric range
+        if os.name == 'nt':
+            primary = list(range(8))
+        else:
+            primary = []
+            for path in sorted(glob.glob('/dev/video*')):
+                try:
+                    primary.append(int(path.replace('/dev/video', '')))
+                except ValueError:
+                    pass
+
     available = []
-    for idx in candidates:
+    for idx in primary:
         if idx in busy:
             available.append({'index': idx, 'in_use': True})
             continue
+        # Probe – may fail right after a release, but we still report the
+        # index because v4l2-ctl told us it's a real capture device.
         cap = cv2.VideoCapture(idx)
-        if cap.isOpened():
-            ok, _frm = cap.read()
+        ok = cap.isOpened()
+        if ok:
+            ok2, _frm = cap.read()
             cap.release()
-            if ok:
-                available.append({'index': idx, 'in_use': False})
+            available.append({'index': idx, 'in_use': False,
+                              'probe_ok': bool(ok2)})
+        else:
+            available.append({'index': idx, 'in_use': False,
+                              'probe_ok': False, 'note': 'busy or unavailable'})
     return available
 
 

@@ -417,7 +417,8 @@ def main():
     # without bouncing the whole process. Closures capture session/bus/occupancy.
     def _rebuild_cameras():
         nonlocal gate_cam, bay_cam_services
-        # Stop existing services
+
+        # ── Stop existing services ────────────────────────────────────────
         try:
             if gate_cam is not None:
                 gate_cam.stop_camera()
@@ -429,12 +430,35 @@ def main():
             except Exception:
                 pass
 
-        # Re-read config to pick up new indexes
+        # USB cameras need ~1-2 s for the kernel to actually release the
+        # device after cap.release() – without this gap the next open()
+        # returns isOpened()=False even though the device exists.
+        time.sleep(1.5)
+
+        # ── Re-read config to pick up new indexes ─────────────────────────
         with open(CONFIG_PATH, encoding='utf-8') as _f:
             new_cfg = yaml.safe_load(_f) or {}
         new_gate_idx = new_cfg.get('gate_camera', {}).get('camera_index', 0)
 
-        # Rebuild bay cameras
+        # ── Rebuild gate camera FIRST so it gets its index before bays ────
+        # (some bay cams might be reassigned to indexes that just freed up)
+        gate_cam = CameraALPRService(
+            db_session   = session,
+            message_bus  = bus,
+            gate_id      = GATE_ID,
+            camera_index = new_gate_idx,
+        )
+        # Retry once after a short wait if the first open fails – v4l2 can
+        # take a moment to settle.
+        if not gate_cam.start_camera():
+            time.sleep(1.0)
+            if not gate_cam.start_camera():
+                logger.warning(
+                    f"Gate camera (index {new_gate_idx}) failed to open "
+                    f"after retry – continuing without gate camera")
+                gate_cam = None
+
+        # ── Rebuild bay cameras ───────────────────────────────────────────
         bay_cam_services = load_bay_cameras(
             config_path       = CONFIG_PATH,
             rois_path         = BAY_ROIS_PATH,
@@ -443,17 +467,11 @@ def main():
             db_session        = session,
         )
         for svc in bay_cam_services:
-            svc.start()
+            try:
+                svc.start()
+            except Exception as exc:
+                logger.warning(f"Bay camera {svc.camera_index} failed to start: {exc}")
 
-        # Rebuild gate camera
-        gate_cam = CameraALPRService(
-            db_session   = session,
-            message_bus  = bus,
-            gate_id      = GATE_ID,
-            camera_index = new_gate_idx,
-        )
-        if not gate_cam.start_camera():
-            raise RuntimeError(f"Gate camera (index {new_gate_idx}) failed to open")
         return gate_cam, bay_cam_services
 
     # Register cameras with web server so /cameras and /video/* routes work
