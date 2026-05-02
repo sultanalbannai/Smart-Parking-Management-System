@@ -90,7 +90,9 @@ for zone in cfg['parking_zones']:
         total_bays += 1
 
 # ── Pre-fill demo scenario: mark select bays as already occupied ──────────────
-DEMO_OCCUPIED = {'STF-01', 'POD-02', 'G-01', 'G-02', 'G-05', 'G-06', 'G-07', 'G-08'}
+# All POD and STAFF bays start free so the recommendation engine can offer
+# them when a vehicle arrives. Only some GENERAL bays are pre-occupied.
+DEMO_OCCUPIED = {'G-01', 'G-02', 'G-05', 'G-06', 'G-07', 'G-08'}
 
 for bay in session.query(Bay).all():
     if bay.id in DEMO_OCCUPIED:
