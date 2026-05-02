@@ -206,6 +206,27 @@
                 Scan plate now
             </button>
             <div id="bmScanMsg" style="display:none; margin-top:6px; font-size:0.78rem;"></div>
+
+            <div style="border-top:1px solid #1e293b; margin-top:14px; padding-top:10px;">
+                <div style="font-size:0.78rem; color:var(--text-3,#475569); margin-bottom:6px;">
+                    Manual override
+                </div>
+                <input id="bmManualPlate" type="text" placeholder="Plate (optional)"
+                       style="width:100%; padding:6px 10px; margin-bottom:6px;
+                              border:1px solid #334155; border-radius:4px;
+                              background:#0f172a; color:#e2e8f0; font-size:0.85rem;">
+                <div style="display:flex; gap:6px;">
+                    <button id="bmMarkOccupied" class="btn-test-alert"
+                            style="flex:1; background:#dc2626; border-color:#dc2626;">
+                        Mark Occupied
+                    </button>
+                    <button id="bmMarkFree" class="btn-test-alert"
+                            style="flex:1; background:#16a34a; border-color:#16a34a;">
+                        Mark Free
+                    </button>
+                </div>
+                <div id="bmStateMsg" style="display:none; margin-top:6px; font-size:0.78rem;"></div>
+            </div>
         </div>
     </div>
 

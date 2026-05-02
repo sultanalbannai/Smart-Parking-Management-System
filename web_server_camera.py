@@ -685,6 +685,86 @@ def get_bay(bay_id):
     })
 
 
+@app.route('/api/bay/<bay_id>/state', methods=['POST'])
+def set_bay_state(bay_id):
+    """
+    Manually set occupancy from the dashboard's bay-info modal.
+    Body: { "state": "AVAILABLE" | "UNAVAILABLE", "plate": "<optional plate>" }
+    """
+    if not db_session:
+        return jsonify({'ok': False, 'error': 'DB not ready'}), 503
+
+    data       = request.get_json(silent=True) or {}
+    new_state  = (data.get('state') or '').upper()
+    plate_text = (data.get('plate') or '').strip() or None
+
+    if new_state not in ('AVAILABLE', 'UNAVAILABLE'):
+        return jsonify({'ok': False,
+                        'error': "state must be 'AVAILABLE' or 'UNAVAILABLE'"}), 400
+
+    bay = db_session.query(Bay).filter(Bay.id == bay_id).first()
+    if not bay:
+        return jsonify({'ok': False, 'error': 'Bay not found'}), 404
+
+    try:
+        if new_state == 'UNAVAILABLE':
+            bay.state            = BayState.UNAVAILABLE
+            bay.occupied_since   = Clock.now()
+            bay.last_update_time = Clock.now()
+            if plate_text:
+                bay.parked_plate = plate_text
+                # Also seed the occupancy hash so detection bookkeeping
+                # treats it like a real arrival.
+                from src.core.plate_hasher import hash_plate
+                bay.occupied_plate_hash = hash_plate(plate_text)
+        else:
+            bay.state               = BayState.AVAILABLE
+            bay.occupied_since      = None
+            bay.parked_plate        = None
+            bay.occupied_plate_hash = None
+            bay.last_update_time    = Clock.now()
+
+        db_session.commit()
+    except Exception as exc:
+        db_session.rollback()
+        logger.error(f"Failed to set bay {bay_id} state: {exc}")
+        return jsonify({'ok': False, 'error': str(exc)}), 500
+
+    # Broadcast so the dashboard map updates and any background services
+    # see the change.
+    if message_bus is not None:
+        try:
+            message_bus.publish(f'parking/bays/{bay_id}/state', {
+                'bayId':  bay_id,
+                'state':  new_state,
+                'source': 'manual',
+            })
+            if plate_text and new_state == 'UNAVAILABLE':
+                message_bus.publish('parking/bays/plate_logged', {
+                    'bayId':  bay_id,
+                    'plate':  plate_text,
+                    'camera': None,
+                    'conf':   1.0,
+                })
+        except Exception:
+            pass
+
+    # Also reset the bay-camera service's plate-known flag so its OCR loop
+    # picks up a real plate next time someone parks (or re-scan now).
+    for svc in _bay_cameras:
+        if bay_id in svc.bay_ids:
+            try:
+                svc._current_state[bay_id] = (new_state == 'UNAVAILABLE')
+                svc._plate_known[bay_id]   = bool(plate_text)
+                svc._best_plate[bay_id]    = (plate_text or None,
+                                               1.0 if plate_text else 0.0)
+            except Exception:
+                pass
+
+    return jsonify({'ok': True, 'bayId': bay_id, 'state': new_state,
+                    'plate': plate_text})
+
+
 @app.route('/api/bay/<bay_id>/read_plate', methods=['POST'])
 def read_bay_plate(bay_id):
     """On-demand plate scan for a specific bay – fired by dashboard button."""

@@ -491,6 +491,7 @@ function fillBayModal(data) {
 // \u2500\u2500 On-demand "Scan plate now" button \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
 document.addEventListener('DOMContentLoaded', () => {
+    setupManualOverride();
     const btn = document.getElementById('bmScanPlate');
     if (!btn) return;
     btn.addEventListener('click', () => {
@@ -602,4 +603,71 @@ function sendTestAlert() {
             btn.disabled = false;
             btn.textContent = 'Send Test Alert';
         });
+}
+
+// ── Manual occupancy override (in bay info modal) ───────────────────────────
+
+function setupManualOverride() {
+    const occBtn   = document.getElementById('bmMarkOccupied');
+    const freeBtn  = document.getElementById('bmMarkFree');
+    const plateIn  = document.getElementById('bmManualPlate');
+    const msg      = document.getElementById('bmStateMsg');
+    if (!occBtn || !freeBtn) return;
+
+    const send = (state) => {
+        const bayId = document.getElementById('bmBayId').textContent.trim();
+        if (!bayId || bayId === '--') return;
+        occBtn.disabled = true; freeBtn.disabled = true;
+        msg.style.display = 'block'; msg.style.color = '#475569';
+        msg.textContent = 'Updating…';
+
+        const body = { state };
+        if (state === 'UNAVAILABLE' && plateIn.value.trim()) {
+            body.plate = plateIn.value.trim();
+        }
+
+        fetch(`/api/bay/${encodeURIComponent(bayId)}/state`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify(body),
+        })
+            .then(r => r.json())
+            .then(j => {
+                if (j.ok) {
+                    msg.style.color = '#16a34a';
+                    msg.textContent = `${bayId} is now ${j.state}`
+                        + (j.plate ? ` (${j.plate})` : '');
+                    // Update modal UI immediately
+                    const stateEl = document.getElementById('bmState');
+                    stateEl.textContent = j.state;
+                    stateEl.className   = 'bm-state ' + j.state;
+                    const plateEl = document.getElementById('bmPlate');
+                    if (j.plate) {
+                        plateEl.textContent = j.plate;
+                        plateEl.classList.remove('empty');
+                    } else if (j.state === 'AVAILABLE') {
+                        plateEl.textContent = 'Bay is empty';
+                        plateEl.classList.add('empty');
+                    }
+                    if (baysData[bayId]) {
+                        baysData[bayId].state = j.state;
+                        baysData[bayId].plate = j.plate || null;
+                    }
+                    plateIn.value = '';
+                } else {
+                    msg.style.color = '#dc2626';
+                    msg.textContent = j.error || 'Update failed';
+                }
+            })
+            .catch(err => {
+                msg.style.color = '#dc2626';
+                msg.textContent = 'Update failed: ' + err;
+            })
+            .finally(() => {
+                occBtn.disabled = false; freeBtn.disabled = false;
+            });
+    };
+
+    occBtn.addEventListener('click',  () => send('UNAVAILABLE'));
+    freeBtn.addEventListener('click', () => send('AVAILABLE'));
 }
