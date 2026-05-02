@@ -140,6 +140,16 @@ class CameraALPRService:
         self._latest_frame = None
         self._frame_lock   = _t.Lock()
 
+        # Background frame-grabber thread keeps _latest_frame fresh even when
+        # the main vehicle-detection loop hasn't been called yet (e.g. right
+        # after a /api/cameras/restart hot-swap). Without this, the MJPEG
+        # endpoint reports "No feed" until process_one_vehicle starts pulling
+        # from the camera.
+        self._grabber_stop   = _t.Event()
+        self._grabber_thread = None
+        self._frame_seq      = 0       # incremented on every new frame
+        self._last_seen_seq  = 0       # consumed by capture_frame()
+
         logger.info("Loading EasyOCR model (first run may take a minute)...")
         _use_gpu = _cuda_available()
         logger.info(f"EasyOCR GPU: {'enabled' if _use_gpu else 'disabled (no CUDA)'}")
@@ -168,6 +178,11 @@ class CameraALPRService:
                 return False
 
             self.is_camera_ready = True
+
+            # Start the background grabber so frames flow even before the
+            # main detection loop calls capture_frame().
+            self._start_grabber()
+
             logger.info(f"Camera {self.camera_index} started")
             return True
 
@@ -175,20 +190,65 @@ class CameraALPRService:
             logger.error(f"Error starting camera: {e}")
             return False
 
+    def _start_grabber(self):
+        """Spawn a daemon thread that keeps reading frames in the background."""
+        import threading as _t
+        self._grabber_stop.clear()
+
+        def _loop():
+            while not self._grabber_stop.is_set():
+                if not self.is_camera_ready or self.camera is None:
+                    time.sleep(0.05)
+                    continue
+                try:
+                    ret, frame = self.camera.read()
+                    if ret and frame is not None:
+                        with self._frame_lock:
+                            self._latest_frame = frame
+                            self._frame_seq   += 1
+                    else:
+                        time.sleep(0.02)
+                except Exception:
+                    time.sleep(0.1)
+            logger.debug(f"Grabber thread exiting (camera {self.camera_index})")
+
+        self._grabber_thread = _t.Thread(target=_loop, daemon=True,
+                                         name=f"GateGrabber-{self.camera_index}")
+        self._grabber_thread.start()
+
     def stop_camera(self):
+        # Signal grabber to exit BEFORE releasing the cap so it doesn't try
+        # to read a freed device.
+        self._grabber_stop.set()
+        if self._grabber_thread is not None:
+            self._grabber_thread.join(timeout=2.0)
+            self._grabber_thread = None
         if self.camera is not None:
             self.camera.release()
+            self.camera = None
             self.is_camera_ready = False
             logger.info("Camera stopped")
 
-    def capture_frame(self) -> Optional[np.ndarray]:
+    def capture_frame(self, timeout: float = 0.5) -> Optional[np.ndarray]:
+        """
+        Return the next NEW frame from the background grabber. Blocks up to
+        ``timeout`` seconds waiting for a frame that hasn't been returned
+        before. Returning a fresh frame each call (instead of duplicating
+        the last one) keeps the motion/settle logic accurate.
+        """
         if not self.is_camera_ready:
             return None
-        ret, frame = self.camera.read()
-        if ret and frame is not None:
+        deadline = time.time() + timeout
+        while time.time() < deadline:
             with self._frame_lock:
-                self._latest_frame = frame
-        return frame if ret else None
+                if self._frame_seq != self._last_seen_seq and self._latest_frame is not None:
+                    self._last_seen_seq = self._frame_seq
+                    return self._latest_frame.copy()
+            time.sleep(0.005)
+        # Timeout: return the last frame we have (might be None) so the
+        # caller can still draw something.
+        with self._frame_lock:
+            return self._latest_frame.copy() if self._latest_frame is not None else None
 
     def get_latest_frame(self) -> Optional[np.ndarray]:
         """Return a copy of the most recent captured frame (thread-safe)."""
