@@ -405,15 +405,12 @@ def main():
     )
 
     if not gate_cam.start_camera():
-        print(f"❌ Gate camera (index {GATE_CAM_IDX}) not available.")
-        print("   Edit GATE_CAM_IDX at the top of this file if needed.")
-        for svc in bay_cam_services:
-            svc.stop()
-        bus.disconnect()
-        session.close()
-        return
-
-    print("✅ Gate camera ready\n")
+        print(f"⚠️  Gate camera (index {GATE_CAM_IDX}) not available.")
+        print("   The web server WILL still start so you can fix the camera")
+        print("   assignment in the browser at /calibrate.")
+        gate_cam = None     # web server can render /calibrate without it
+    else:
+        print("✅ Gate camera ready\n")
 
     # ── Camera rebuild callback for /api/cameras/restart ─────────────────────
     # Lets the calibration page re-read config and restart cameras in-place
@@ -476,6 +473,13 @@ def main():
     # ── Gate ALPR loop ────────────────────────────────────────────────────────
     vehicle_number = 1
     try:
+        if gate_cam is None:
+            print("⚠️  No gate camera – running web server only.")
+            print("   Open /calibrate to assign a camera, then restart.")
+            # Block until Ctrl+C so the web server keeps serving requests
+            while True:
+                time.sleep(60)
+
         while True:
             keep_going = process_one_vehicle(
                 camera            = gate_cam,
@@ -501,7 +505,8 @@ def main():
             cv2.destroyAllWindows()
         except Exception:
             pass
-        gate_cam.stop_camera()
+        if gate_cam is not None:
+            gate_cam.stop_camera()
         for svc in bay_cam_services:
             svc.stop()
         bus.disconnect()
