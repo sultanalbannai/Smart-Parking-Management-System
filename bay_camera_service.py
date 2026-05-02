@@ -65,6 +65,8 @@ YOLO_IMGSZ         = 320         # YOLO input size (was default 640) – ~4× fa
 VEHICLE_CLASSES    = {2, 5, 7}  # COCO: car=2, bus=5, truck=7
 DEBOUNCE_COUNT     = 4           # consecutive same-state frames to commit
 MIN_CONF           = 0.30        # minimum EasyOCR confidence
+PLATE_MIN_DIGITS   = 3           # reject reads shorter than this (avoids partials)
+PLATE_LOCK_DIGITS  = 4           # stop retrying once a read of this length is seen
 OCR_RETRY_FRAMES   = 150         # keep retrying OCR for this many frames (~5 s)
 OCR_RETRY_INTERVAL = 15          # attempt OCR every N frames during retry window
 
@@ -150,10 +152,14 @@ class BayCameraService:
         # Per-bay OCR retry budget (frames remaining to keep trying after occupancy)
         self._ocr_retry: Dict[str, int] = {b: 0 for b in bay_ids}
 
-        # Per-bay plate-known flag: True once a plate has been successfully read
-        # for the current occupancy. Reset on vacancy. While False AND occupied,
-        # the main loop runs OCR every OCR_RETRY_INTERVAL frames indefinitely.
+        # Per-bay plate-known flag: True once a plate of length PLATE_LOCK_DIGITS
+        # or longer has been read. Reset on vacancy. While False AND occupied,
+        # the main loop runs OCR every OCR_RETRY_INTERVAL frames indefinitely
+        # and updates the saved plate if a longer/higher-confidence read appears.
         self._plate_known: Dict[str, bool] = {b: False for b in bay_ids}
+        # Best plate seen for the current occupancy: (text, confidence)
+        self._best_plate: Dict[str, Tuple[Optional[str], float]] = \
+            {b: (None, 0.0) for b in bay_ids}
 
         logger.info(f"[{self.label}] Loading YOLOv8n …")
         self._yolo = _get_yolo()
@@ -200,6 +206,7 @@ class BayCameraService:
         self._current_state[bay_id] = False
         self._ocr_retry[bay_id]     = 0
         self._plate_known[bay_id]   = False
+        self._best_plate[bay_id]    = (None, 0.0)
         logger.info(f"[{self.label}] Now also watching bay: {bay_id}")
 
     def update_roi(self, bay_id: str, roi: Tuple[int, int, int, int]) -> None:
@@ -328,23 +335,24 @@ class BayCameraService:
                 self._update_state(bay_id, occupied, conf, frame, frame_count)
 
             # ── Continuous plate OCR ───────────────────────────────────────
-            # While a bay is OCCUPIED and we haven't captured a plate yet,
-            # run OCR every OCR_RETRY_INTERVAL frames indefinitely. Stops as
-            # soon as a plate is read OR the bay becomes vacant.
+            # While a bay is OCCUPIED and we haven't locked a confident plate
+            # yet, run OCR every OCR_RETRY_INTERVAL frames indefinitely.
+            # Track the BEST read seen so far (longest, then highest conf) and
+            # save updates to the DB; "lock" (stop retrying) only when a read
+            # of PLATE_LOCK_DIGITS+ digits appears.
             if frame_count % OCR_RETRY_INTERVAL == 0:
                 for bay_id in self.bay_ids:
                     if not self._current_state.get(bay_id):
                         continue          # bay vacant
                     if self._plate_known.get(bay_id):
-                        continue          # plate already captured
+                        continue          # plate already locked
                     roi = self.rois.get(bay_id)
                     if roi is None:
                         continue
                     plate = self._read_plate_crop(frame, roi)
-                    if plate:
-                        logger.info(f"[{self.label}] {bay_id} plate (continuous): {plate}")
-                        self._save_plate(bay_id, plate)
-                        self._plate_known[bay_id] = True
+                    if not plate:
+                        continue
+                    self._maybe_update_best_plate(bay_id, plate)
 
         cap.release()
         logger.info(f"[{self.label}] Camera released")
@@ -364,15 +372,18 @@ class BayCameraService:
         if not currently_occupied and self._occ_streak[bay_id] >= DEBOUNCE_COUNT:
             self._current_state[bay_id] = True
             self._plate_known[bay_id]   = False    # fresh occupancy, plate unknown
+            self._best_plate[bay_id]    = (None, 0.0)
             # Fast first attempt (no upscale) – continuous retry will use upscale
             plate = self._read_plate_crop(frame, self.rois[bay_id], use_upscale=False)
             if plate:
-                self._plate_known[bay_id] = True   # got it on first try
+                # Apply same length-aware best-plate tracking as the retry loop
+                self._maybe_update_best_plate(bay_id, plate)
             self._on_occupied(bay_id, plate, conf)
 
         elif currently_occupied and self._free_streak[bay_id] >= DEBOUNCE_COUNT:
             self._current_state[bay_id] = False
             self._plate_known[bay_id]   = False    # reset for next occupancy
+            self._best_plate[bay_id]    = (None, 0.0)
             self._ocr_retry[bay_id]     = 0
             self._on_vacant(bay_id)
 
@@ -463,8 +474,14 @@ class BayCameraService:
             for img in images:
                 for (_bbox, text, c) in self._ocr.readtext(img):
                     t = _normalize(text)
-                    if 2 <= len(t) <= 10 and c >= MIN_CONF and c > best_conf:
-                        best_text, best_conf = t, c
+                    if (PLATE_MIN_DIGITS <= len(t) <= 10
+                            and c >= MIN_CONF):
+                        # Prefer LONGER reads first, then higher confidence –
+                        # avoids accepting a 2-digit partial of a 4-digit plate.
+                        cur_len  = len(best_text) if best_text else 0
+                        if (len(t) > cur_len
+                                or (len(t) == cur_len and c > best_conf)):
+                            best_text, best_conf = t, c
 
             if best_text:
                 logger.debug(f"[{self.label}] OCR result: {best_text}  conf={best_conf:.2f}")
@@ -473,6 +490,29 @@ class BayCameraService:
         except Exception as e:
             logger.warning(f"[{self.label}] OCR error: {e}")
             return None
+
+    def _maybe_update_best_plate(self, bay_id: str, plate: str,
+                                 confidence: float = 0.0) -> None:
+        """
+        Compare ``plate`` to the best seen for this bay. If it's longer
+        (or same length but higher confidence), persist it and consider
+        locking. Confidence is optional – callers that don't have it pass 0.
+        """
+        prev_text, prev_conf = self._best_plate.get(bay_id, (None, 0.0))
+        prev_len = len(prev_text) if prev_text else 0
+        better = (
+            len(plate) > prev_len
+            or (len(plate) == prev_len and confidence > prev_conf)
+        )
+        if not better:
+            return
+        self._best_plate[bay_id] = (plate, confidence)
+        logger.info(f"[{self.label}] {bay_id} plate (continuous): {plate}"
+                    + (f"  conf={confidence:.2f}" if confidence else ""))
+        self._save_plate(bay_id, plate)
+        if len(plate) >= PLATE_LOCK_DIGITS:
+            self._plate_known[bay_id] = True
+            logger.info(f"[{self.label}] {bay_id} plate locked at {plate}")
 
     def _save_plate(self, bay_id: str, plate: str):
         """Persist a newly-read plate to the bay row and broadcast the event."""
