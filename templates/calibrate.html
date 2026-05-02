@@ -7,6 +7,10 @@
     <title>SPMS – ROI Calibration</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/production.css') }}">
     <style>
+        /* Override the dashboard's fixed-viewport height so the calibration
+           page can scroll when there are many cameras / long content. */
+        html, body { height: auto; min-height: 100vh; overflow-y: auto; }
+        .dashboard { height: auto !important; min-height: 100vh; }
         .cal-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
