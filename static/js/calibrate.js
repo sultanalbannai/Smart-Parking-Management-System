@@ -27,7 +27,205 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     document.querySelectorAll('.cal-card').forEach(setupCard);
+    setupAssignmentPanel();
 });
+
+// ── Camera assignment panel ─────────────────────────────────────────────────
+
+let _availableCams = [];
+let _allBayIds = [];
+
+async function setupAssignmentPanel() {
+    const status = document.getElementById('assignStatus');
+    document.getElementById('btnRescan').addEventListener('click', loadAssignmentPanel);
+    document.getElementById('btnSaveAssign').addEventListener('click', saveAndRestart);
+    await loadAssignmentPanel();
+}
+
+async function loadAssignmentPanel() {
+    const detectedEl = document.getElementById('assignDetected');
+    const rolesEl    = document.getElementById('assignRoles');
+    detectedEl.innerHTML = '<span style="color:#64748b;">Scanning cameras…</span>';
+
+    // 1. Detected cameras (with snapshot thumbnails)
+    let avail = [];
+    try {
+        const r = await fetch('/api/cameras/available');
+        const j = await r.json();
+        avail = j.cameras || [];
+    } catch (e) {
+        detectedEl.innerHTML = '<span style="color:#dc2626;">Camera scan failed: '
+            + e + '</span>';
+        return;
+    }
+    _availableCams = avail.map(c => c.index);
+
+    if (avail.length === 0) {
+        detectedEl.innerHTML = '<span style="color:#dc2626;">No cameras detected. '
+            + 'Plug in USB cameras and press Rescan.</span>';
+    } else {
+        detectedEl.innerHTML = '';
+        const ts = Date.now();
+        for (const c of avail) {
+            const wrap = document.createElement('div');
+            wrap.className = 'cam-thumb';
+            wrap.innerHTML = `
+                <img src="/api/cameras/${c.index}/snapshot.jpg?t=${ts}"
+                     alt="cam ${c.index}"
+                     onerror="this.style.background='#1f2937'">
+                <div>idx ${c.index}${c.in_use ? ' (in use)' : ''}</div>
+            `;
+            detectedEl.appendChild(wrap);
+        }
+    }
+
+    // 2. Get all bay IDs (for the bay-selection multi-select)
+    if (_allBayIds.length === 0) {
+        try {
+            const r = await fetch('/api/bays');
+            const j = await r.json();
+            _allBayIds = Object.keys(j.bays || {}).sort();
+        } catch (e) { /* ignore */ }
+    }
+
+    // 3. Get current assignments
+    let assign = { gate_camera: {}, bay_cameras: [] };
+    try {
+        const r = await fetch('/api/assignments');
+        assign = await r.json();
+    } catch (e) { /* ignore */ }
+
+    rolesEl.innerHTML = '';
+
+    // Gate camera row
+    rolesEl.appendChild(buildRoleRow({
+        kind:    'gate',
+        label:   'Gate Camera',
+        current: assign.gate_camera?.camera_index,
+    }));
+
+    // Bay-camera rows
+    const bayCams = assign.bay_cameras || [];
+    if (bayCams.length === 0) {
+        rolesEl.appendChild(buildRoleRow({
+            kind: 'bay', label: 'Bay Camera 1', current: null, bays: [],
+        }));
+    } else {
+        bayCams.forEach((bc, i) => {
+            rolesEl.appendChild(buildRoleRow({
+                kind:    'bay',
+                label:   bc.label || `Bay Camera ${i + 1}`,
+                current: bc.camera_index,
+                bays:    bc.bays || [],
+            }));
+        });
+    }
+
+    // "Add bay camera" button
+    const addBtn = document.createElement('button');
+    addBtn.className = 'cal-btn';
+    addBtn.textContent = '+ Add bay camera';
+    addBtn.addEventListener('click', () => {
+        const n = rolesEl.querySelectorAll('[data-role-kind="bay"]').length + 1;
+        rolesEl.insertBefore(
+            buildRoleRow({ kind: 'bay', label: `Bay Camera ${n}`,
+                           current: null, bays: [] }),
+            addBtn
+        );
+    });
+    rolesEl.appendChild(addBtn);
+}
+
+function buildRoleRow({ kind, label, current, bays }) {
+    const row = document.createElement('div');
+    row.className = 'role-row';
+    row.dataset.roleKind = kind;
+
+    const indexOpts = ['<option value="">-- pick --</option>']
+        .concat(_availableCams.map(i =>
+            `<option value="${i}" ${i === current ? 'selected' : ''}>idx ${i}</option>`));
+
+    if (kind === 'gate') {
+        row.innerHTML = `
+            <label><strong>${label}</strong></label>
+            <select class="cam-idx">${indexOpts.join('')}</select>
+        `;
+    } else {
+        // bay row: index + label + bays multi-select
+        const baysOpts = _allBayIds.map(b =>
+            `<option value="${b}" ${(bays || []).includes(b) ? 'selected' : ''}>${b}</option>`);
+        row.innerHTML = `
+            <label><strong>${label}</strong></label>
+            <select class="cam-idx">${indexOpts.join('')}</select>
+            <input type="text" class="cam-label" value="${label}" placeholder="Label">
+            <label style="font-size:0.78rem;color:#475569;">Bays:
+              <select multiple class="cam-bays" size="3" style="min-width:130px;">
+                ${baysOpts.join('')}
+              </select>
+            </label>
+            <button class="cal-btn role-remove" type="button">Remove</button>
+        `;
+        row.querySelector('.role-remove').addEventListener('click', () => row.remove());
+    }
+    return row;
+}
+
+async function saveAndRestart() {
+    const status = document.getElementById('assignStatus');
+    const btn    = document.getElementById('btnSaveAssign');
+
+    const gateRow = document.querySelector('[data-role-kind="gate"]');
+    const gateIdx = parseInt(gateRow.querySelector('.cam-idx').value, 10);
+    if (isNaN(gateIdx)) {
+        status.style.color = '#dc2626';
+        status.textContent = 'Pick a gate camera index first.';
+        return;
+    }
+
+    const bayRows = document.querySelectorAll('[data-role-kind="bay"]');
+    const bayCams = [];
+    for (const row of bayRows) {
+        const idx = parseInt(row.querySelector('.cam-idx').value, 10);
+        if (isNaN(idx)) continue;
+        const lbl = row.querySelector('.cam-label').value.trim()
+                    || `Camera ${idx}`;
+        const bays = Array.from(
+            row.querySelectorAll('.cam-bays option:checked')
+        ).map(o => o.value);
+        bayCams.push({ camera_index: idx, label: lbl, bays });
+    }
+
+    btn.disabled = true;
+    status.style.color = '#475569';
+    status.textContent = 'Saving config…';
+
+    try {
+        const r = await fetch('/api/assignments', {
+            method:  'POST',
+            headers: {'Content-Type': 'application/json'},
+            body:    JSON.stringify({
+                gate_camera_index: gateIdx,
+                bay_cameras:       bayCams,
+            }),
+        });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || 'save failed');
+
+        status.textContent = 'Restarting cameras…';
+        const r2 = await fetch('/api/cameras/restart', {method: 'POST'});
+        const j2 = await r2.json();
+        if (!j2.ok) throw new Error(j2.error || 'restart failed');
+
+        status.style.color = '#16a34a';
+        status.textContent = `Cameras restarted (gate idx ${j2.gate_index},`
+            + ` bays [${(j2.bay_indexes || []).join(', ')}]). Reloading page…`;
+        setTimeout(() => location.reload(), 1500);
+    } catch (e) {
+        status.style.color = '#dc2626';
+        status.textContent = 'Failed: ' + e.message;
+        btn.disabled = false;
+    }
+}
 
 function setupCard(card) {
     const camIdx  = parseInt(card.dataset.cameraIndex, 10);

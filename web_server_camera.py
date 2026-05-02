@@ -53,12 +53,21 @@ alert_service = AlertService()  # SMS / email notification engine
 # ── Camera services (registered after startup) ────────────────────────────────
 _gate_camera = None
 _bay_cameras  = []
+_camera_rebuild_fn = None    # callable() -> (gate, [bay_services]) – restarts cameras
 
-def register_cameras(gate_camera, bay_cameras):
-    """Called from run_camera_demo once cameras are initialised."""
-    global _gate_camera, _bay_cameras
+def register_cameras(gate_camera, bay_cameras, rebuild_fn=None):
+    """
+    Called from run_camera_demo once cameras are initialised.
+    ``rebuild_fn`` is an optional callable that stops existing camera services,
+    re-reads the config, and returns freshly started ones. The /calibrate page
+    invokes it via /api/cameras/restart so users don't have to bounce the
+    process when they re-assign physical camera indexes.
+    """
+    global _gate_camera, _bay_cameras, _camera_rebuild_fn
     _gate_camera = gate_camera
     _bay_cameras  = bay_cameras or []
+    if rebuild_fn is not None:
+        _camera_rebuild_fn = rebuild_fn
     logger.info(f"Cameras registered – gate: {gate_camera is not None}, "
                 f"bay: {len(_bay_cameras)}")
 
@@ -255,6 +264,170 @@ def cameras_page():
     for svc in _bay_cameras:
         cams.append({'label': svc.label, 'url': f'/video/bay/{svc.camera_index}'})
     return render_template('camera_feed.html', cameras=cams)
+
+
+# ── Camera assignment helpers (used by the /calibrate page) ──────────────────
+
+def _enumerate_cameras():
+    """
+    Enumerate Linux /dev/videoN devices (or 0..7 on Windows) and return a list
+    of indexes that can actually be opened and produce a frame. Each index
+    that is currently in use by a running service is also reported as ``in_use``.
+    """
+    import os, glob
+    candidates = []
+    if os.name == 'nt':
+        candidates = list(range(8))
+    else:
+        for path in sorted(glob.glob('/dev/video*')):
+            try:
+                candidates.append(int(path.replace('/dev/video', '')))
+            except ValueError:
+                pass
+
+    busy = set()
+    if _gate_camera is not None and _gate_camera.is_camera_ready:
+        busy.add(_gate_camera.camera_index)
+    for svc in _bay_cameras:
+        busy.add(svc.camera_index)
+
+    available = []
+    for idx in candidates:
+        if idx in busy:
+            available.append({'index': idx, 'in_use': True})
+            continue
+        cap = cv2.VideoCapture(idx)
+        if cap.isOpened():
+            ok, _frm = cap.read()
+            cap.release()
+            if ok:
+                available.append({'index': idx, 'in_use': False})
+    return available
+
+
+def _snapshot_for_index(cam_idx: int):
+    """Return a BGR frame for ``cam_idx``, reusing live services when possible."""
+    if _gate_camera is not None and _gate_camera.camera_index == cam_idx \
+            and _gate_camera.is_camera_ready:
+        f = _gate_camera.get_latest_frame()
+        if f is not None:
+            return f
+    for svc in _bay_cameras:
+        if svc.camera_index == cam_idx:
+            f = svc.get_latest_frame()
+            if f is not None:
+                return f
+    cap = cv2.VideoCapture(cam_idx)
+    if not cap.isOpened():
+        return None
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    for _ in range(5):
+        cap.read()
+    ok, frame = cap.read()
+    cap.release()
+    return frame if ok else None
+
+
+@app.route('/api/cameras/available')
+def api_cameras_available():
+    return jsonify({'cameras': _enumerate_cameras()})
+
+
+@app.route('/api/cameras/<int:cam_idx>/snapshot.jpg')
+def api_camera_snapshot(cam_idx):
+    frame = _snapshot_for_index(cam_idx)
+    if frame is None:
+        return ('', 404)
+    frame = cv2.resize(frame, (320, 240))
+    ok, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+    if not ok:
+        return ('', 500)
+    return Response(buf.tobytes(), mimetype='image/jpeg',
+                    headers={'Cache-Control': 'no-store'})
+
+
+@app.route('/api/assignments', methods=['GET'])
+def api_get_assignments():
+    """Return the current gate + bay-camera assignments from the YAML config."""
+    import yaml, os
+    cfg_path = os.path.join('config', 'camera_demo_config.yaml')
+    try:
+        with open(cfg_path, encoding='utf-8') as f:
+            cfg = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        cfg = {}
+    return jsonify({
+        'gate_camera':  cfg.get('gate_camera', {}),
+        'bay_cameras':  cfg.get('bay_cameras', []),
+    })
+
+
+@app.route('/api/assignments', methods=['POST'])
+def api_save_assignments():
+    """
+    Save camera assignments from the calibration page.
+    Body: {
+        gate_camera_index: int,
+        bay_cameras: [{camera_index, label, bays: [...]}]
+    }
+    Persists to camera_demo_config.yaml. Does NOT restart the cameras –
+    the client should follow up with POST /api/cameras/restart.
+    """
+    import yaml, os
+    data = request.get_json(silent=True) or {}
+    gate_idx = data.get('gate_camera_index')
+    bay_assignments = data.get('bay_cameras') or []
+
+    cfg_path = os.path.join('config', 'camera_demo_config.yaml')
+    try:
+        with open(cfg_path, encoding='utf-8') as f:
+            cfg = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        cfg = {}
+
+    if gate_idx is not None:
+        cfg.setdefault('gate_camera', {})
+        cfg['gate_camera']['camera_index'] = int(gate_idx)
+        cfg['gate_camera'].setdefault('label', 'Gate Camera - ALPR')
+
+    if bay_assignments:
+        cfg['bay_cameras'] = [
+            {
+                'camera_index': int(b.get('camera_index')),
+                'label':        b.get('label') or f"Camera {b.get('camera_index')}",
+                'bays':         list(b.get('bays') or []),
+            }
+            for b in bay_assignments
+            if b.get('camera_index') is not None
+        ]
+
+    with open(cfg_path, 'w', encoding='utf-8') as f:
+        yaml.safe_dump(cfg, f, sort_keys=False)
+
+    return jsonify({'ok': True, 'restart_required': True})
+
+
+@app.route('/api/cameras/restart', methods=['POST'])
+def api_cameras_restart():
+    """Stop running cameras, re-read config, start fresh services."""
+    global _gate_camera, _bay_cameras
+    if _camera_rebuild_fn is None:
+        return jsonify({'ok': False,
+                        'error': 'Hot-restart not supported by this build. '
+                                 'Stop and re-run python3 run_camera_demo.py.'}), 501
+    try:
+        gate, bays = _camera_rebuild_fn()
+        _gate_camera = gate
+        _bay_cameras = bays or []
+        return jsonify({
+            'ok': True,
+            'gate_index':   gate.camera_index if gate else None,
+            'bay_indexes':  [c.camera_index for c in _bay_cameras],
+        })
+    except Exception as exc:
+        logger.exception("Camera restart failed")
+        return jsonify({'ok': False, 'error': str(exc)}), 500
 
 
 @app.route('/calibrate')

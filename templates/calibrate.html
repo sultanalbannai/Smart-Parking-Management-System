@@ -80,6 +80,50 @@
             border-radius: 6px;
             margin: 12px 18px 0;
         }
+        .cal-btn {
+            font-size: 0.85rem;
+            padding: 6px 12px;
+            border-radius: 4px;
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            cursor: pointer;
+        }
+        .cal-btn-primary {
+            background: #2563eb;
+            color: #fff;
+            border-color: #2563eb;
+        }
+        .cal-btn:disabled { opacity:0.5; cursor:not-allowed; }
+        .cam-thumb {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.75rem;
+            color: #475569;
+        }
+        .cam-thumb img {
+            width: 160px;
+            height: 120px;
+            object-fit: cover;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            background: #000;
+        }
+        .role-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .role-row > label { min-width: 160px; font-size:0.85rem; }
+        .role-row select { padding: 4px 8px; font-size: 0.85rem; }
+        .role-row input[type="text"] {
+            padding: 4px 8px;
+            font-size: 0.85rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
@@ -97,11 +141,31 @@
         </header>
 
         <div class="cal-help">
-            Click and drag on a bay camera feed to draw a rectangle around the
-            license-plate area. Pick the bay this rectangle belongs to and press
-            <strong>Save ROI</strong>. Saved ROIs take effect immediately —
-            no restart required. The existing ROI is shown in green.
+            <strong>1. Assign cameras</strong> to roles below (gate, bays).
+            <strong>2. Draw ROIs</strong> on each bay camera by clicking and
+            dragging a tight rectangle around the license-plate area. Saved
+            ROIs take effect immediately. Existing ROI is shown in green.
         </div>
+
+        <!-- ── Camera assignment panel ──────────────────────────────────── -->
+        <section id="assignPanel" style="margin: 12px 18px; padding: 14px;
+                background: var(--bg-card,#fff); border: 1px solid #e2e8f0;
+                border-radius: 8px;">
+            <h3 style="margin:0 0 10px;">Camera Assignment</h3>
+            <div id="assignDetected" style="display:flex; gap:10px; flex-wrap:wrap;
+                    margin-bottom:14px;">
+                <span style="color:#64748b;">Detecting cameras…</span>
+            </div>
+            <div id="assignRoles" style="display:flex; flex-direction:column;
+                    gap:8px;"></div>
+            <div style="display:flex; gap:8px; align-items:center; margin-top:12px;">
+                <button id="btnRescan" class="cal-btn">Rescan</button>
+                <button id="btnSaveAssign" class="cal-btn cal-btn-primary">
+                    Save &amp; Restart Cameras
+                </button>
+                <span id="assignStatus" style="font-size:0.8rem; color:#475569;"></span>
+            </div>
+        </section>
 
         <div class="cal-grid" id="calGrid">
             {% for cam in cameras %}

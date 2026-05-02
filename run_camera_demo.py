@@ -415,8 +415,52 @@ def main():
 
     print("✅ Gate camera ready\n")
 
+    # ── Camera rebuild callback for /api/cameras/restart ─────────────────────
+    # Lets the calibration page re-read config and restart cameras in-place
+    # without bouncing the whole process. Closures capture session/bus/occupancy.
+    def _rebuild_cameras():
+        nonlocal gate_cam, bay_cam_services
+        # Stop existing services
+        try:
+            if gate_cam is not None:
+                gate_cam.stop_camera()
+        except Exception:
+            pass
+        for svc in bay_cam_services:
+            try:
+                svc.stop()
+            except Exception:
+                pass
+
+        # Re-read config to pick up new indexes
+        with open(CONFIG_PATH, encoding='utf-8') as _f:
+            new_cfg = yaml.safe_load(_f) or {}
+        new_gate_idx = new_cfg.get('gate_camera', {}).get('camera_index', 0)
+
+        # Rebuild bay cameras
+        bay_cam_services = load_bay_cameras(
+            config_path       = CONFIG_PATH,
+            rois_path         = BAY_ROIS_PATH,
+            occupancy_service = occupancy,
+            bus               = bus,
+            db_session        = session,
+        )
+        for svc in bay_cam_services:
+            svc.start()
+
+        # Rebuild gate camera
+        gate_cam = CameraALPRService(
+            db_session   = session,
+            message_bus  = bus,
+            gate_id      = GATE_ID,
+            camera_index = new_gate_idx,
+        )
+        if not gate_cam.start_camera():
+            raise RuntimeError(f"Gate camera (index {new_gate_idx}) failed to open")
+        return gate_cam, bay_cam_services
+
     # Register cameras with web server so /cameras and /video/* routes work
-    _web.register_cameras(gate_cam, bay_cam_services)
+    _web.register_cameras(gate_cam, bay_cam_services, rebuild_fn=_rebuild_cameras)
     print("📹 Camera streams : http://127.0.0.1:5000/cameras\n")
     print("="*60)
     print(" HOW TO USE ".center(60))
