@@ -355,17 +355,29 @@ def _enumerate_cameras():
 
 
 def _snapshot_for_index(cam_idx: int):
-    """Return a BGR frame for ``cam_idx``, reusing live services when possible."""
-    if _gate_camera is not None and _gate_camera.camera_index == cam_idx \
-            and _gate_camera.is_camera_ready:
-        f = _gate_camera.get_latest_frame()
-        if f is not None:
-            return f
+    """
+    Return a BGR frame for ``cam_idx``. Always prefers live services so the
+    calibrate-page thumbnail reflects what the running pipeline actually sees.
+    Only falls back to opening the camera directly when *no* service holds it,
+    which avoids hiding a silently-broken service behind a fresh open.
+    """
+    held_by_service = False
+    if _gate_camera is not None and _gate_camera.camera_index == cam_idx:
+        held_by_service = True
+        if _gate_camera.is_camera_ready:
+            f = _gate_camera.get_latest_frame()
+            if f is not None:
+                return f
     for svc in _bay_cameras:
         if svc.camera_index == cam_idx:
+            held_by_service = True
             f = svc.get_latest_frame()
             if f is not None:
                 return f
+    if held_by_service:
+        # A service claims this index but isn't producing frames – don't
+        # paper over it with a direct open; let the UI show 'no preview'.
+        return None
     cap = cv2.VideoCapture(cam_idx)
     if not cap.isOpened():
         return None

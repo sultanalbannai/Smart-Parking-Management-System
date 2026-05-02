@@ -246,9 +246,30 @@ class BayCameraService:
     # ── Internal loop ─────────────────────────────────────────────────────────
 
     def _run(self):
-        cap = cv2.VideoCapture(self.camera_index)
-        if not cap.isOpened():
-            logger.error(f"[{self.label}] Cannot open camera {self.camera_index}")
+        # Retry the open – right after a hot-restart of the camera services
+        # the kernel may need a moment to release the previous v4l2 holder
+        # and a single cap.open() can return isOpened()=False even though
+        # the device exists.
+        cap = None
+        for attempt in range(10):
+            if self._stop_event.is_set():
+                return
+            cap = cv2.VideoCapture(self.camera_index)
+            if cap.isOpened():
+                ok, _frm = cap.read()
+                if ok:
+                    break
+                cap.release()
+            else:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+            logger.warning(f"[{self.label}] open camera {self.camera_index} "
+                           f"failed (attempt {attempt+1}/10) – retrying in 1s")
+            time.sleep(1.0)
+        else:
+            logger.error(f"[{self.label}] Giving up on camera {self.camera_index}")
             return
 
         cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAPTURE_WIDTH)
