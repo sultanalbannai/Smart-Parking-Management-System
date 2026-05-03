@@ -1,17 +1,23 @@
-# Smart Parking Management System - Dependencies
+# Smart Parking Management System - Python dependencies
+#
+# On a Jetson Orin Nano you should NOT install torch / torchvision via this
+# file - they must come from NVIDIA's JetPack-specific wheel. See README.md.
+# Install everything else with:  pip install -r requirements.txt
 
-# Core messaging
-paho-mqtt>=1.6.1
+# Web server
+flask>=3.0.0
+flask-socketio>=5.3.0
 
-# Database
+# Persistence + config
 sqlalchemy>=2.0.0
-
-# Configuration
 pyyaml>=6.0
 
-# Testing
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
+# Computer vision
+opencv-python>=4.10.0,<4.11
+numpy>=1.26,<2.0
+ultralytics>=8.4
+easyocr>=1.7
 
-# Utilities
-python-dateutil>=2.8.2
+# TensorRT / ONNX export (only used by the one-off engine build)
+onnx>=1.12,<2.0
+onnxslim>=0.1.71
