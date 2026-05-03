@@ -1,19 +1,20 @@
 """
-Camera ALPR Demo - Single Entrance + 3 Bay Cameras
-====================================================
-Gate camera  (camera_index = 0 by default, separate from bay cameras):
-  Reads license plates at the entrance, assigns a bay, shows on kiosk.
+Smart Parking Management System - Camera ALPR Demo
 
-Bay cameras  (camera_index 0/1/2 as configured in camera_demo_config.yaml):
-  Run in background threads; use YOLOv8 to detect occupancy in each bay's
-  ROI and EasyOCR to log the plate at the bay.
+Single-entrance demo running on an NVIDIA Jetson Orin Nano:
+  - Gate camera reads license plates at the entrance
+  - Bay cameras detect occupancy via YOLOv8 and read parked plates via EasyOCR
+  - Web dashboard, kiosk, and live MJPEG streams served on port 5000
 
 Usage:
-  1. python init_camera_db.py          # first time only
-  2. python calibrate_bay_rois.py      # draw ROIs for each bay camera
-  3. python run_camera_demo.py
+    python init_camera_db.py     # first run only - creates the SQLite DB
+    python run_camera_demo.py    # start the demo
 
-Press 'q' in the gate-camera window to quit.
+ROI calibration and camera-index assignment are done in the browser at
+http://<host>:5000/calibrate (no monitor required on the Jetson).
+
+Set SPMS_HEADLESS=1 to disable all OpenCV preview windows when running
+on a headless server.
 """
 
 import sys
@@ -210,9 +211,9 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
         logger.info("Gate camera: quit or timeout")
         return False
 
-    print(f"\n🚗 Gate plate: {plate_number}")
+    print(f"\nGate plate: {plate_number}")
 
-    print("⏳ Waiting for driver to select priority on kiosk…")
+    print("Waiting for driver to select priority on kiosk…")
 
     # Drain any stale value left from a previous round
     while not priority_queue.empty():
@@ -250,10 +251,10 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
 
     if priority_str is None:
         priority_str = 'GENERAL'
-        print("⚠️  No priority selected in time – defaulting to GENERAL")
+        print("No priority selected in time – defaulting to GENERAL")
 
     priority_class = PRIORITY_MAP.get(priority_str.upper(), PriorityClass.GENERAL)
-    print(f"✅ Priority: {priority_class.value}")
+    print(f"Priority: {priority_class.value}")
 
     # Session
     session_id = str(uuid.uuid4())
@@ -286,7 +287,7 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
     )
 
     if not suggestion and priority_class != PriorityClass.GENERAL:
-        print(f"⚠️  No {priority_class.value} bays available – falling back to GENERAL")
+        print(f"No {priority_class.value} bays available – falling back to GENERAL")
         session.priority_class = PriorityClass.GENERAL
         db_session.commit()
         suggestion = recommendation.generate_suggestion(
@@ -294,14 +295,14 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
         )
 
     if not suggestion:
-        print("⚠️  No available bays – lot may be full!")
+        print("No available bays – lot may be full!")
         bus.publish('parking/full', {'sessionId': session_id})
         return True
 
     primary_bay = db_session.query(Bay).filter(Bay.id == suggestion.primary_bay_id).first()
     alt_ids     = suggestion.alternative_bay_ids.split(',') if suggestion.alternative_bay_ids else []
 
-    print(f"💡 Suggested: {suggestion.primary_bay_id}"
+    print(f"Suggested: {suggestion.primary_bay_id}"
           + (f"  ({primary_bay.distance_from_gate}m)" if primary_bay else ""))
     if alt_ids:
         print(f"   Alternatives: {', '.join(alt_ids)}")
@@ -317,7 +318,7 @@ def process_one_vehicle(camera, db_session, bus, recommendation,
     })
 
     # Bay cameras handle occupancy via the live monitor window.
-    print(f"\n✅ Suggestion issued – bay cameras will confirm when car arrives at {suggestion.primary_bay_id}")
+    print(f"\nSuggestion issued – bay cameras will confirm when car arrives at {suggestion.primary_bay_id}")
     return True
 
 
@@ -331,8 +332,8 @@ def main():
     with open(CONFIG_PATH, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
-    print(f"🏬 {cfg['facility_name']}")
-    print(f"🗄️  DB: {cfg['database_path']}\n")
+    print(f"{cfg['facility_name']}")
+    print(f"DB: {cfg['database_path']}\n")
 
     # Database
     db      = Database(f"sqlite:///{cfg['database_path']}")
@@ -340,10 +341,10 @@ def main():
 
     bay_count = session.query(Bay).count()
     if bay_count == 0:
-        print("⚠️  No bays in DB – run:  python init_camera_db.py\n")
+        print("No bays in DB – run:  python init_camera_db.py\n")
         session.close()
         return
-    print(f"✅ {bay_count} bays loaded")
+    print(f"{bay_count} bays loaded")
 
     # Message bus + services
     bus            = MessageBus()
@@ -356,13 +357,13 @@ def main():
     priority_queue = queue.Queue()
 
     # Web server
-    print("\n🌐 Starting web server…")
+    print("\nStarting web server…")
     threading.Thread(target=run_web_server, args=(session, bus, priority_queue),
                      daemon=True).start()
     time.sleep(2)
 
-    print("📊 Dashboard : http://127.0.0.1:5000")
-    print("🖥️  Kiosk     : http://127.0.0.1:5000/kiosk")
+    print("Dashboard : http://127.0.0.1:5000")
+    print("Kiosk     : http://127.0.0.1:5000/kiosk")
     try:
         webbrowser.open('http://127.0.0.1:5000')
         time.sleep(0.5)
@@ -373,11 +374,11 @@ def main():
     # ── Bay cameras ───────────────────────────────────────────────────────────
     rois_exist = Path(BAY_ROIS_PATH).exists()
     if not rois_exist:
-        print(f"\n⚠️  Bay ROI file not found: {BAY_ROIS_PATH}")
+        print(f"\nBay ROI file not found: {BAY_ROIS_PATH}")
         print("   Bay cameras will start but won't detect bays until calibrated.")
         print("   Run:  python calibrate_bay_rois.py\n")
 
-    print("\n📷 Starting bay cameras…")
+    print("\nStarting bay cameras…")
     bay_cam_services = []
     try:
         bay_cam_services = load_bay_cameras(
@@ -389,14 +390,14 @@ def main():
         )
         for svc in bay_cam_services:
             svc.start()
-        print(f"✅ {len(bay_cam_services)} bay camera(s) running in background")
-        print("✅ Bay monitor will display alongside gate camera (main thread)")
+        print(f"{len(bay_cam_services)} bay camera(s) running in background")
+        print("Bay monitor will display alongside gate camera (main thread)")
     except Exception as e:
-        print(f"⚠️  Bay cameras failed to start: {e}")
+        print(f"Bay cameras failed to start: {e}")
         print("   Continuing without bay cameras…")
 
     # ── Gate camera (entrance ALPR) ───────────────────────────────────────────
-    print(f"\n📷 Initializing gate camera (index {GATE_CAM_IDX})…")
+    print(f"\nInitializing gate camera (index {GATE_CAM_IDX})…")
     gate_cam = CameraALPRService(
         db_session   = session,
         message_bus  = bus,
@@ -405,12 +406,12 @@ def main():
     )
 
     if not gate_cam.start_camera():
-        print(f"⚠️  Gate camera (index {GATE_CAM_IDX}) not available.")
+        print(f"Gate camera (index {GATE_CAM_IDX}) not available.")
         print("   The web server WILL still start so you can fix the camera")
         print("   assignment in the browser at /calibrate.")
         gate_cam = None     # web server can render /calibrate without it
     else:
-        print("✅ Gate camera ready\n")
+        print("Gate camera ready\n")
 
     # ── Camera rebuild callback for /api/cameras/restart ─────────────────────
     # Lets the calibration page re-read config and restart cameras in-place
@@ -476,7 +477,7 @@ def main():
 
     # Register cameras with web server so /cameras and /video/* routes work
     _web.register_cameras(gate_cam, bay_cam_services, rebuild_fn=_rebuild_cameras)
-    print("📹 Camera streams : http://127.0.0.1:5000/cameras\n")
+    print("Camera streams : http://127.0.0.1:5000/cameras\n")
     print("="*60)
     print(" HOW TO USE ".center(60))
     print("="*60)
@@ -492,7 +493,7 @@ def main():
     vehicle_number = 1
     try:
         if gate_cam is None:
-            print("⚠️  No gate camera – running web server only.")
+            print("No gate camera – running web server only.")
             print("   Open /calibrate to assign a camera, then restart.")
             # Block until Ctrl+C so the web server keeps serving requests
             while True:
@@ -516,7 +517,7 @@ def main():
             time.sleep(1)
 
     except KeyboardInterrupt:
-        print("\n\n👋 Interrupted")
+        print("\n\nInterrupted")
 
     finally:
         try:
@@ -540,7 +541,7 @@ def main():
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n👋 Goodbye!\n")
+        print("\nGoodbye!\n")
 
 
 if __name__ == '__main__':

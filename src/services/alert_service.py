@@ -115,11 +115,11 @@ class AlertService:
                 self._was_full = False
                 self._fire(
                     AlertType.LOT_RECOVERED,
-                    subject='✅ Parking Spaces Now Available',
+                    subject='Parking Spaces Now Available',
                     body=self._render_email(
                         title='Spaces Now Available',
                         colour='#10b981',
-                        icon='✅',
+                        icon='',
                         lines=[
                             f'<strong>{available}</strong> space(s) are now free.',
                             'The lot is accepting vehicles again.',
@@ -134,11 +134,11 @@ class AlertService:
         if pct >= critical and available > 0:
             self._fire(
                 AlertType.CRITICAL_OCCUPANCY,
-                subject=f'⚠️ Parking Critical — {pct}% Full',
+                subject=f'Parking Critical — {pct}% Full',
                 body=self._render_email(
                     title=f'Critical Occupancy: {pct}%',
                     colour='#f59e0b',
-                    icon='⚠️',
+                    icon='',
                     lines=[
                         f'Occupancy has reached <strong>{pct}%</strong>.',
                         f'Only <strong>{available}</strong> space(s) remaining out of {total}.',
@@ -154,7 +154,7 @@ class AlertService:
         if pct >= high:
             self._fire(
                 AlertType.HIGH_OCCUPANCY,
-                subject=f'📊 Parking High Occupancy — {pct}% Full',
+                subject=f'Parking High Occupancy — {pct}% Full',
                 body=self._render_email(
                     title=f'High Occupancy: {pct}%',
                     colour='#3b82f6',

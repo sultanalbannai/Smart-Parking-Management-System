@@ -136,7 +136,7 @@ def init_system(external_db=None, external_bus=None, priority_queue=None):
         message_bus.subscribe('parking/bays/plate_logged',    on_plate_logged)
 
         alert_service.start()
-        logger.info("✅ Camera web server initialized")
+        logger.info("Camera web server initialized")
 
 
 # ── Message bus handlers ──────────────────────────────────────────────────────
@@ -906,5 +906,5 @@ def handle_disconnect():
 
 
 def run_server(host='0.0.0.0', port=5000):
-    logger.info(f"🌐 Camera demo web server on {host}:{port}")
+    logger.info(f"Camera demo web server on {host}:{port}")
     socketio.run(app, host=host, port=port, debug=False, allow_unsafe_werkzeug=True)
