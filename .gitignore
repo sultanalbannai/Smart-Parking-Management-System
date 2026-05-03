@@ -25,3 +25,6 @@ Thumbs.db
 *.bak
 *.old
 data/*.db.old
+
+# Office / editor lock files
+~$*
